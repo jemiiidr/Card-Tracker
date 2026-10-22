@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
+import { getApiSession, unauthorized } from "@/lib/api-session";
 
 export const runtime = "nodejs";
 // Leave headroom beneath Vercel's 4.5 MB function request limit (multipart overhead included).
@@ -8,6 +9,7 @@ const maxImageBytes = 4 * 1024 * 1024;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export async function POST(request: Request) {
+  if (!(await getApiSession())) return unauthorized();
   const apiKey = process.env.TCGDB_API_KEY || process.env.PRICE_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "TCGDB_API_KEY is not configured on the server." }, { status: 503 });
   const incoming = await request.formData();

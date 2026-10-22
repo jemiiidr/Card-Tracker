@@ -3,7 +3,7 @@ import { unstable_cache } from "next/cache";
 const normalized = (value: string) => value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
 
 /**
- * TCGDB identifies and prices the card. Its free base64 identify response does not
+ * TCGDB identifies the card; TCG API supplies its price. Its free base64 identify response does not
  * include catalog artwork, so use TCGdex's public Pokémon catalog for an exact
  * set + collector-number image match. Unsupported games or missing catalog art
  * gracefully use the UI placeholder.

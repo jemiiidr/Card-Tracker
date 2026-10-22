@@ -2,29 +2,29 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { badRequest, getApiSession, unauthorized } from "@/lib/api-session";
 import { createSupabaseAdminClient } from "@/lib/supabase-admin";
-import { extractTcgdbPrice, getCachedTcgdbPrice } from "@/lib/tcgdb";
+import { getCachedTcgPrice, getTcgApiKey } from "@/lib/tcg-pricing";
 import { getCachedPokemonCardImage } from "@/lib/tcgdex-image";
 
 export async function GET() {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  let { data, error } = await session.supabase.from("collection_items")
+  const { data: initialData, error } = await session.supabase.from("collection_items")
     .select("id,quantity,condition,grade,purchase_price,acquired_at,created_at,card:card_catalog(id,catalog_key,name,set_name,card_number,game,rarity,image_url,market_value,price_updated_at)")
     .eq("owner_id", session.user.id).gt("quantity", 0).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  let data = initialData;
   const staleCards = new Map<string, any>();
   const cutoff = Date.now() - 6 * 60 * 60 * 1000;
   for (const item of data || []) {
     const card = Array.isArray(item.card) ? item.card[0] : item.card;
     if (card && (!card.price_updated_at || new Date(card.price_updated_at).getTime() < cutoff)) staleCards.set(card.id, card);
   }
-  if ((process.env.TCGDB_API_KEY || process.env.PRICE_API_KEY) && staleCards.size) {
+  if (getTcgApiKey() && staleCards.size) {
     const admin = createSupabaseAdminClient();
     await Promise.all([...staleCards.values()].slice(0, 8).map(async (card) => {
       try {
-        const priced = await getCachedTcgdbPrice(card.name, card.set_name, card.game);
-        const value = extractTcgdbPrice(priced);
-        if (typeof value === "number") await admin.from("card_catalog").update({ market_value: value, price_updated_at: priced?.data?.pricing?.ungraded?.priceUpdatedAt || priced?.data?.lastUpdated || new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", card.id);
+        const priced = await getCachedTcgPrice(card.name, card.set_name, card.card_number, card.game);
+        if (typeof priced.marketValue === "number") await admin.from("card_catalog").update({ market_value: priced.marketValue, price_updated_at: priced.priceUpdatedAt || new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", card.id);
       } catch { /* Keep the last known price if the provider is unavailable or its daily quota is exhausted. */ }
     }));
     const refreshed = await session.supabase.from("collection_items")
@@ -60,10 +60,10 @@ export async function POST(request: Request) {
   if (purchasePrice != null && (!Number.isFinite(purchasePrice) || purchasePrice < 0)) return badRequest("Purchase price must be zero or more.");
 
   try {
-    // A successful card match should still be saveable when TCGDB has no price for it.
+    // A successful card match should still be saveable when TCG API has no price for it.
     let priceResult: any = null;
-    try { priceResult = await getCachedTcgdbPrice(name, set, game, condition); } catch { /* Preserve the last known price or save without an estimate. */ }
-    const marketValue = extractTcgdbPrice(priceResult);
+    try { priceResult = await getCachedTcgPrice(name, set, cardNumber, game); } catch { /* Preserve the last known price or save without an estimate. */ }
+    const marketValue = priceResult?.marketValue ?? null;
     const catalogKey = createHash("sha256").update(`${game}|${set}|${cardNumber}|${name}`.toLowerCase()).digest("hex");
     const admin = createSupabaseAdminClient();
     const resolvedImageUrl = imageUrl || await getCachedPokemonCardImage(game, set, cardNumber);
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       catalog_key: catalogKey, name, set_name: set, card_number: cardNumber, game, rarity,
       image_url: resolvedImageUrl || existingCatalog?.image_url || null,
       market_value: marketValue ?? existingCatalog?.market_value ?? null,
-      price_updated_at: marketValue === null ? existingCatalog?.price_updated_at ?? null : priceResult?.data?.pricing?.ungraded?.priceUpdatedAt || priceResult?.data?.lastUpdated || new Date().toISOString(),
+      price_updated_at: marketValue === null ? existingCatalog?.price_updated_at ?? null : priceResult?.priceUpdatedAt || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }, { onConflict: "catalog_key" }).select("id").single();
     if (catalogError || !catalog) throw new Error(catalogError?.message || "Could not save card details.");

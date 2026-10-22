@@ -10,8 +10,9 @@ const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export async function POST(request: Request) {
   if (!(await getApiSession())) return unauthorized();
-  const apiKey = process.env.TCGDB_API_KEY || process.env.PRICE_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "TCGDB_API_KEY is not configured on the server." }, { status: 503 });
+  const legacyPriceKey = process.env.PRICE_API_KEY;
+  const apiKey = process.env.TCGDB_API_KEY || (legacyPriceKey && !legacyPriceKey.startsWith("tcg_live_") ? legacyPriceKey : undefined);
+  if (!apiKey) return NextResponse.json({ error: "Set TCGDB_API_KEY for photo identification. A TCG API tcg_live_ key cannot authenticate with TCGDB." }, { status: 503 });
   const incoming = await request.formData();
   const image = incoming.get("image");
   if (!(image instanceof File)) return NextResponse.json({ error: "Choose a card photo to identify." }, { status: 400 });

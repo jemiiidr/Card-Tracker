@@ -5,21 +5,21 @@ Cardhaus is a single-store trading card shop and private collection tracker buil
 ## Features
 
 - Supabase email/password authentication with protected pages and API routes.
-- TCGDB photo identification and card-price lookup, with a card selection step before saving. A matched card can still be saved if TCGDB has no current estimate for it; its portfolio value remains unknown until a price is available.
+- TCGDB photo identification and TCG API card-price lookup, with a card selection step before saving. A matched card can still be saved if TCG API has no current estimate for it; its portfolio value remains unknown until a price is available.
 - Exact-match Pokémon card artwork from the free TCGdex catalog; cards without a matching catalog image show an explicit placeholder.
 - A private portfolio with quantity, condition, grade, acquisition cost, and estimated market value.
-- A shared digital card catalog populated by identified cards, with artwork, search, game filters, and one-tap add-to-portfolio actions. This catalog grows from cards identified in Cardhaus; it is not a complete TCGDB card search because TCGDB's public API exposes identification and pricing rather than a catalog-search endpoint.
+- A shared digital card catalog populated by identified cards, with artwork, search, game filters, and one-tap add-to-portfolio actions. This catalog grows from cards identified in Cardhaus; it is not a complete TCGDB card search because TCGDB's public API exposes identification rather than a catalog-search endpoint.
 - One store marketplace. Buyers see the store's asking price and discounts, never a collector's private portfolio or the card catalog's market estimate.
 - Cart and checkout that creates a pending order and reserves available stock. This project does not include online payment processing; the store arranges payment and delivery with the buyer.
 - Store-owner order management, listing controls, inventory, and a dashboard with portfolio value, cost basis, profit tracking, and daily snapshots.
 - Supabase Row Level Security (RLS) policies keep portfolios private and limit store management to the configured store owner.
-- Caching for TCGDB identification (30 days) and price results (6 hours); stale prices remain available if the provider is unavailable.
+- Caching for TCGDB identification (30 days) and TCG API price results (24 hours); stale prices remain available if the provider is unavailable.
 
 ## Requirements
 
 - Node.js 20 or newer and npm.
 - A Supabase project.
-- A TCGDB API key. The application uses TCGDB for both image identification and prices. Only configure services/features available on your TCGDB plan; no paid API or vision provider is required by this app.
+- A TCGDB API key for photo identification and a TCG API key for market prices. Set `TCGDB_API_KEY` and `TCGAPI_KEY`; the app also accepts `POKEMON_TCG_API_KEY` for TCG API pricing. A legacy non-`tcg_live_` `PRICE_API_KEY` can still supply the TCGDB scanner key.
 
 ## Run locally
 
@@ -56,9 +56,10 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 TCGDB_API_KEY=your-tcgdb-api-key
+TCGAPI_KEY=your-tcgapi-key
 ```
 
-The app also accepts the legacy server-only variable `PRICE_API_KEY` in place of `TCGDB_API_KEY`. Never prefix a provider key or the service-role key with `NEXT_PUBLIC_`, commit `.env.local`, or expose these secrets to the browser. The service-role key bypasses RLS and is used only by authenticated server routes for shared catalog writes and price refreshes.
+`TCGDB_API_KEY` is used only for TCGDB photo identification. `TCGAPI_KEY` (or `POKEMON_TCG_API_KEY`) is used for TCG API prices; `PRICE_API_KEY` remains a migration fallback for prices and for TCGDB identification when it is not a `tcg_live_` TCG API key. Never prefix provider keys or the service-role key with `NEXT_PUBLIC_`, commit `.env.local`, or expose these secrets to the browser. The service-role key bypasses RLS and is used only by authenticated server routes for shared catalog writes and price refreshes.
 
 ### 4. Start the app and create the store owner
 
@@ -84,11 +85,11 @@ npm run dev -- -p 3001
 
 Add `http://localhost:3001/auth/callback` to Supabase's allowed redirect URLs when using that port.
 
-## TCGDB usage and caching
+## Card identification, pricing, and caching
 
-The browser sends an optimized card photo to `/api/tcg/identify`; the server calls TCGDB and caches identical photo results. Once a card match is selected, `/api/tcg/price` fetches its market estimate. TCGDB's free beta quotas and availability are controlled by TCGDB and can change. A cache hit avoids another provider request; new photos and uncached card/condition lookups use the provider quota. Prices are estimates and may not match a completed sale. TCGDB's documented identify response does not include catalog artwork for base64 scans, so Pokémon cards use an exact set/number lookup against the keyless TCGdex catalog. Missing or unsupported artwork uses a built-in placeholder rather than a broken image.
+The browser sends an optimized card photo to `/api/tcg/identify`; the server calls TCGDB and caches identical photo results. Once a match is selected, `/api/tcg/price` searches TCG API by card name and game, then matches the returned set and collector number before accepting its `market_price`. TCG API uses the `X-API-Key` header and a daily request quota. Price lookups cache for 24 hours because the provider refreshes market prices daily. Prices are estimates and may not match a completed sale. TCGDB's documented identify response does not include catalog artwork for base64 scans, so Pokémon cards use an exact set/number lookup against the keyless TCGdex catalog. Missing or unsupported artwork uses a built-in placeholder rather than a broken image.
 
-The app compresses photos on the device and rejects optimized uploads over 4 MB. Price results are cached for six hours and photo-identification results for 30 days. Supabase stores card catalog entries and the last known price; reads keep the last known price if TCGDB is unavailable. Marketplace responses deliberately omit market-value fields and expose the seller-entered asking price instead.
+The app compresses photos on the device and rejects optimized uploads over 4 MB. Price results are cached for 24 hours and photo-identification results for 30 days. Supabase stores card catalog entries and the last known price; reads keep the last known price when the price provider is unavailable. Marketplace responses deliberately omit market-value fields and expose the seller-entered asking price instead.
 
 ## Database and privacy
 
@@ -97,7 +98,7 @@ Supabase provides PostgreSQL, Auth, and Storage. The schema defines a shared car
 ## Deploy to Vercel
 
 1. Push the project to a Git repository and import it into [Vercel](https://vercel.com/new).
-2. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `TCGDB_API_KEY` as Vercel environment variables for the environments you use. Keep service keys private.
+2. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `TCGDB_API_KEY`, and `TCGAPI_KEY` as Vercel environment variables for the environments you use. Keep service keys private.
 3. Deploy with the standard Next.js build settings.
 4. In Supabase **Authentication → URL Configuration**, set the production site URL to your Vercel domain and add `https://YOUR_DOMAIN/auth/callback` to allowed redirect URLs. Add preview URLs if you use preview deployments.
 5. Apply `supabase/schema.sql` to the Supabase project if you have not already, then designate the store-owner account with the SQL above.

@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Camera, Check, ChevronDown, CircleDollarSign, Heart, LayoutDashboard, LoaderCircle, LogOut, PackageCheck, Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, Tag, TrendingUp, Upload, UserRound, X } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Camera, Check, ChevronDown, CircleDollarSign, LayoutDashboard, LoaderCircle, LogOut, PackageCheck, Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, Tag, TrendingUp, Upload, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -61,6 +61,7 @@ export default function Home() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(true);
+  const [apiPending, setApiPending] = useState(0);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [modal, setModal] = useState<"scan" | "cart" | "listing" | "edit" | null>(null);
@@ -74,7 +75,6 @@ export default function Home() {
   const [marketPrice, setMarketPrice] = useState<number | null>(null);
   const [priceBusy, setPriceBusy] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [favorites, setFavorites] = useState<string[]>([]);
   const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null);
   const [listingItem, setListingItem] = useState<PortfolioItem | null>(null);
   const [filter, setFilter] = useState<"all" | "sale">("all");
@@ -83,22 +83,28 @@ export default function Home() {
   const catalogOffset = useRef(0);
   const catalogRequest = useRef(0);
 
+  const trackedFetch = useCallback(async (input: RequestInfo | URL, init?: RequestInit) => {
+    setApiPending((count) => count + 1);
+    try { return await fetch(input, init); }
+    finally { setApiPending((count) => Math.max(0, count - 1)); }
+  }, []);
+
   const loadData = useCallback(async (quiet = false) => {
     if (!quiet) setBusy(true);
     setError("");
     try {
-      const meRes = await fetch("/api/me", { cache: "no-store" });
+      const meRes = await trackedFetch("/api/me", { cache: "no-store" });
       if (!meRes.ok) throw new Error((await meRes.json()).error || "Please sign in again.");
       const me = await meRes.json(); setUser(me.user); setIsOwner(Boolean(me.profile?.is_store_owner));
-      const jobs = [fetch("/api/portfolio", { cache: "no-store" }), fetch("/api/marketplace", { cache: "no-store" }), fetch("/api/dashboard", { cache: "no-store" }), fetch("/api/orders", { cache: "no-store" })];
-      if (me.profile?.is_store_owner) jobs.push(fetch("/api/listings", { cache: "no-store" }));
+      const jobs = [trackedFetch("/api/portfolio", { cache: "no-store" }), trackedFetch("/api/marketplace", { cache: "no-store" }), trackedFetch("/api/dashboard", { cache: "no-store" }), trackedFetch("/api/orders", { cache: "no-store" })];
+      if (me.profile?.is_store_owner) jobs.push(trackedFetch("/api/listings", { cache: "no-store" }));
       const responses = await Promise.all(jobs);
       const values = await Promise.all(responses.map(async (response) => { const value = await response.json(); if (!response.ok) throw new Error(value.error || "Could not load your account."); return value; }));
       setCollection(values[0].items || []); setMarket(values[1].listings || []); setDashboard(values[2]); setOrders(values[3].orders || []); setOwnerListings(me.profile?.is_store_owner ? values[4].listings || [] : []);
       try { setCart(JSON.parse(localStorage.getItem(`cardhaus-cart-${me.user.id}`) || "[]")); } catch { setCart([]); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load Cardhaus."); }
     finally { if (!quiet) setBusy(false); }
-  }, []);
+  }, [trackedFetch]);
 
   useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => { if (user) localStorage.setItem(`cardhaus-cart-${user.id}`, JSON.stringify(cart)); }, [cart, user]);
@@ -112,7 +118,7 @@ export default function Home() {
       const params = new URLSearchParams({ offset: String(offset) });
       if (search.trim()) params.set("q", search.trim());
       if (game) params.set("game", game);
-      const response = await fetch(`/api/catalog?${params}`, { cache: "no-store" });
+      const response = await trackedFetch(`/api/catalog?${params}`, { cache: "no-store" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not load the card catalog.");
       if (requestId !== catalogRequest.current) return;
@@ -123,7 +129,7 @@ export default function Home() {
     } catch (cause) {
       if (requestId === catalogRequest.current) setCatalogError(cause instanceof Error ? cause.message : "Could not load the card catalog.");
     } finally { if (requestId === catalogRequest.current) { setCatalogBusy(false); setCatalogRefreshing(false); } }
-  }, [catalogSearch, catalogGame]);
+  }, [catalogSearch, catalogGame, trackedFetch]);
 
   useEffect(() => {
     if (view !== "Card catalog") return;
@@ -134,7 +140,7 @@ export default function Home() {
 
   function notify(text: string) { setNotice(text); window.setTimeout(() => setNotice(""), 3000); }
   async function api(url: string, method = "GET", body?: unknown) {
-    const response = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const response = await trackedFetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
     const value = await response.json(); if (!response.ok) throw new Error(value.error || "Request failed."); return value;
   }
   async function signOut() { if (supabase) await supabase.auth.signOut(); router.replace("/login"); router.refresh(); }
@@ -150,7 +156,7 @@ export default function Home() {
     setModal("scan"); setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setScanUnmatched(false); setScanBusy(true);
     try {
       const compressed = await compressPhoto(file); const form = new FormData(); form.append("image", compressed);
-      const response = await fetch("/api/tcg/identify", { method: "POST", body: form });
+      const response = await trackedFetch("/api/tcg/identify", { method: "POST", body: form });
       const body = await response.json(); if (!response.ok || !body.success) throw new Error(body.error || "Card identification failed.");
       const rawCandidates = body.data?.candidates?.length ? body.data.candidates : body.data ? [body.data] : [];
       const list: Candidate[] = rawCandidates.map((candidate: any) => ({
@@ -170,7 +176,7 @@ export default function Home() {
   async function chooseCandidate(candidate: Candidate) {
     setSelected(candidate); setMarketPrice(null); setPriceBusy(true); setScanError("");
     try {
-      const result = await api("/api/tcg/price", "POST", { cardName: candidate.name, set: candidate.set, game: candidate.game, condition: "Near Mint" });
+      const result = await api("/api/tcg/price", "POST", { cardName: candidate.name, set: candidate.set, cardNumber: candidate.cardNumber, game: candidate.game });
       const price = result.marketValue;
       if (typeof price === "number") setMarketPrice(price);
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : "Could not look up this card's price."); }
@@ -182,7 +188,7 @@ export default function Home() {
     setSaveBusy(true);
     try {
       const saved = await api("/api/portfolio", "POST", { name: selected.name, set: selected.set, cardNumber: selected.cardNumber, game: selected.game, rarity: selected.rarity, imageUrl: selected.imageUrl, condition: form.get("condition"), grade: form.get("grade"), quantity: form.get("quantity"), purchasePrice: form.get("purchasePrice") });
-      setModal(null); await loadData(true); notify(saved.priceUnavailable ? "Card added. TCGDB has no current price estimate for this card." : "Added to your private collection.");
+      setModal(null); await loadData(true); notify(saved.priceUnavailable ? "Card added. TCG API has no current price estimate for this card." : "Added to your private collection.");
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : "Could not save card."); }
     finally { setSaveBusy(false); }
   }
@@ -244,7 +250,7 @@ export default function Home() {
       <div className="profile"><div className="avatar profile-avatar">{user?.email?.[0]?.toUpperCase() || "C"}</div><div><b>{user?.email}</b><small>{isOwner ? "Store owner" : "Collector"}</small></div><button className="logout-button" title="Sign out" onClick={signOut}><LogOut size={15}/></button></div>
     </aside>
 
-    <section className="main-area"><header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view}</b></div><div className="top-actions"><span className="live-dot"/>{busy ? "Loading your account…" : "Your collection is private"}<button className="icon-button notification" aria-label="Cart" onClick={() => setModal("cart")}><ShoppingBag size={18}/>{cart.length > 0 && <i/>}</button></div></header>
+    <section className="main-area"><header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view}</b></div><div className="top-actions"><span className={`live-dot ${apiPending ? "request-active" : ""}`}/><span className={apiPending ? "api-request-status is-loading" : "api-request-status"} aria-live="polite">{apiPending ? <><LoaderCircle className="spin" size={12}/> {apiPending > 1 ? `${apiPending} requests in progress…` : "Request in progress…"}</> : busy ? "Loading your account…" : "Your collection is private"}</span><button className="icon-button notification" aria-label="Cart" onClick={() => setModal("cart")}><ShoppingBag size={18}/>{cart.length > 0 && <i/>}</button></div></header>
       <div className="content">
         <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>{view === "Marketplace" ? "THE CARDHAUS STORE" : view === "Store manager" ? "SINGLE STORE CONTROL PANEL" : view === "Card catalog" ? "DIGITAL CARD LIBRARY" : "YOUR COLLECTION AT A GLANCE"}</div><h1>{view === "Overview" ? <>A good day to<br/><em>collect something.</em></> : view === "Card catalog" ? <>Browse the<br/><em>card catalog.</em></> : view === "Marketplace" ? <>Find your next<br/><em>favorite card.</em></> : view === "Store manager" ? <>Run your<br/><em>little card shop.</em></> : view === "My orders" ? <>Your orders,<br/><em>all in one place.</em></> : <>Your cards,<br/><em>beautifully tracked.</em></>}</h1><p className="intro">{view === "Overview" ? "A little snapshot of the cards you love and what they’re worth." : view === "Card catalog" ? "Explore digital card entries, view their artwork, and add copies to your private collection." : view === "Marketplace" ? "One store, thoughtful listings, prices set by the shop." : view === "Store manager" ? "Manage listings, discounts, inventory, and orders." : view === "My orders" ? "Check order status or review the cards you’ve purchased." : "Your collection is private. Only you can see these cards."}</p></div><div className="welcome-actions">{view === "Marketplace" && <button className="primary-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button>}{(view === "Overview" || view === "My collection" || view === "Card catalog") && <button className="primary-button scan-button" onClick={() => setModal("scan")}><Camera size={16}/> Scan a card <span className="button-plus">+</span></button>}</div></section>
 
@@ -252,8 +258,8 @@ export default function Home() {
         {busy && <AccountSkeleton />}
 
         {!busy && view === "Overview" && <>
-          <section className="stats-grid"><Stat title="COLLECTION VALUE" value={dashboard?.marketValue == null ? "—" : currency(dashboard.marketValue)} icon={<CircleDollarSign size={17}/>} tone="green" note={dashboard?.history?.length ? `${dashboard.history.length} daily snapshots` : "Market estimates from TCGDB"}/><Stat title="CARDS COLLECTED" value={`${dashboard?.cardCount || 0}`} icon={<Tag size={16}/>} tone="purple" note="Across your private portfolio"/><Stat title={isOwner ? "ACTIVE STORE LISTINGS" : "AVAILABLE IN STORE"} value={isOwner ? currency(dashboard?.listedValue || 0) : `${market.length} cards`} icon={<ShoppingBag size={16}/>} tone="yellow" note={isOwner ? "Current asking prices × stock" : "One independent storefront"}/><Stat title="UNREALIZED PROFIT / LOSS" value={`${(dashboard?.unrealizedProfit || 0) >= 0 ? "+" : "−"}${currency(Math.abs(dashboard?.unrealizedProfit || 0))}`} icon={<TrendingUp size={16}/>} tone="orange" positive={(dashboard?.unrealizedProfit || 0) >= 0} note={`Realized sales: ${currency(dashboard?.realizedProfit || 0)}`}/></section>
-          <section className="dashboard-grid"><div className="chart-card"><div className="section-heading"><div><h2>Portfolio performance</h2><p>Daily market value snapshots, recorded when you open your dashboard.</p></div></div><div className="chart-summary"><span className="chart-total">{currency(dashboard?.marketValue || 0)}</span><span className={(dashboard?.unrealizedProfit || 0) >= 0 ? "growth small-growth" : "trend down"}>{(dashboard?.unrealizedProfit || 0) >= 0 ? <ArrowUpRight size={13}/> : <ArrowDownRight size={13}/>} {currency(Math.abs(dashboard?.unrealizedProfit || 0))} unrealized</span></div><div className="performance-list">{dashboard?.history?.length ? dashboard.history.slice(-8).map((point) => <div key={point.snapshot_date}><span>{new Date(`${point.snapshot_date}T00:00:00`).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</span><div className="performance-track"><i style={{ width: `${Math.max(2, Math.min(100, (point.market_value / Math.max(dashboard.marketValue, 1)) * 100))}%` }}/></div><b>{currency(point.market_value)}</b></div>) : <p className="empty-chart">Your portfolio value snapshots will appear here as you check back over time.</p>}</div></div><div className="insight-card"><div className="insight-head"><span className="insight-icon"><Sparkles size={15}/></span><span>COLLECTOR SNAPSHOT</span></div><h3>{collection.length ? <>Your collection has<br/><em>{collection.length} unique entries.</em></> : <>Your collection<br/><em>starts with one card.</em></>}</h3><p>{collection.length ? `${dashboard?.cardCount || 0} total cards. ${dashboard?.costBasis ? `You have tracked ${currency(dashboard.costBasis)} in purchase costs.` : "Add purchase prices to track your cost basis and profit."}` : "Scan a card to identify it, check its current estimate, and add it to your private portfolio."}</p><div className="insight-foot"><span>{collection.length ? "Private to your account" : "TCGDB identification and pricing"}</span><span className="insight-spark">⌁</span></div><div className="insight-decoration">✳</div></div></section>
+          <section className="stats-grid"><Stat title="COLLECTION VALUE" value={dashboard?.marketValue == null ? "—" : currency(dashboard.marketValue)} icon={<CircleDollarSign size={17}/>} tone="green" note={dashboard?.history?.length ? `${dashboard.history.length} daily snapshots` : "Market estimates from TCG API"}/><Stat title="CARDS COLLECTED" value={`${dashboard?.cardCount || 0}`} icon={<Tag size={16}/>} tone="purple" note="Across your private portfolio"/><Stat title={isOwner ? "ACTIVE STORE LISTINGS" : "AVAILABLE IN STORE"} value={isOwner ? currency(dashboard?.listedValue || 0) : `${market.length} cards`} icon={<ShoppingBag size={16}/>} tone="yellow" note={isOwner ? "Current asking prices × stock" : "One independent storefront"}/><Stat title="UNREALIZED PROFIT / LOSS" value={`${(dashboard?.unrealizedProfit || 0) >= 0 ? "+" : "−"}${currency(Math.abs(dashboard?.unrealizedProfit || 0))}`} icon={<TrendingUp size={16}/>} tone="orange" positive={(dashboard?.unrealizedProfit || 0) >= 0} note={`Realized sales: ${currency(dashboard?.realizedProfit || 0)}`}/></section>
+          <section className="dashboard-grid"><div className="chart-card"><div className="section-heading"><div><h2>Portfolio performance</h2><p>Daily market value snapshots, recorded when you open your dashboard.</p></div></div><div className="chart-summary"><span className="chart-total">{currency(dashboard?.marketValue || 0)}</span><span className={(dashboard?.unrealizedProfit || 0) >= 0 ? "growth small-growth" : "trend down"}>{(dashboard?.unrealizedProfit || 0) >= 0 ? <ArrowUpRight size={13}/> : <ArrowDownRight size={13}/>} {currency(Math.abs(dashboard?.unrealizedProfit || 0))} unrealized</span></div><div className="performance-list">{dashboard?.history?.length ? dashboard.history.slice(-8).map((point) => <div key={point.snapshot_date}><span>{new Date(`${point.snapshot_date}T00:00:00`).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</span><div className="performance-track"><i style={{ width: `${Math.max(2, Math.min(100, (point.market_value / Math.max(dashboard.marketValue, 1)) * 100))}%` }}/></div><b>{currency(point.market_value)}</b></div>) : <p className="empty-chart">Your portfolio value snapshots will appear here as you check back over time.</p>}</div></div><div className="insight-card"><div className="insight-head"><span className="insight-icon"><Sparkles size={15}/></span><span>COLLECTOR SNAPSHOT</span></div><h3>{collection.length ? <>Your collection has<br/><em>{collection.length} unique entries.</em></> : <>Your collection<br/><em>starts with one card.</em></>}</h3><p>{collection.length ? `${dashboard?.cardCount || 0} total cards. ${dashboard?.costBasis ? `You have tracked ${currency(dashboard.costBasis)} in purchase costs.` : "Add purchase prices to track your cost basis and profit."}` : "Scan a card to identify it, check its current estimate, and add it to your private portfolio."}</p><div className="insight-foot"><span>{collection.length ? "Private to your account" : "TCGDB identification · TCG API pricing"}</span><span className="insight-spark">⌁</span></div><div className="insight-decoration">✳</div></div></section>
           <section className="collection-section"><div className="section-heading"><div><div className="section-kicker">PRIVATE TO YOU</div><h2>Recently added <span className="subtle-count">{collection.length} entries</span></h2></div><button className="text-button" onClick={() => setView("My collection")}>View collection <ArrowRight size={14}/></button></div><PortfolioGrid items={collection.slice(0,4)} isOwner={isOwner} onEdit={(item) => { setEditingItem(item); setModal("edit"); }} onList={(item) => { setListingItem(item); setModal("listing"); }} onRemove={removeCollectionItem}/></section>
         </>}
 
@@ -272,7 +278,7 @@ export default function Home() {
     {cart.length > 0 && <button className="cart-float" onClick={() => setModal("cart")}><ShoppingBag size={16}/> Cart <span>{cart.length}</span></button>}
     {notice && <div className="toast"><Check size={16}/>{notice}</div>}
     {modal && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setModal(null)}><div className="modal"><button className="modal-close" onClick={() => setModal(null)}><X size={18}/></button>
-      {modal === "scan" && <><div className="modal-icon"><Camera size={19}/></div><div className="section-kicker">ADD TO YOUR PRIVATE COLLECTION</div><h2>Let’s find your card.</h2><p>TCGDB identifies the card and looks up a market estimate when pricing is available. The photo is compressed on your device before upload.</p><button className="upload-box" disabled={scanBusy || saveBusy} onClick={() => fileInput.current?.click()}><Upload size={20}/><b>{scanBusy ? "Identifying card…" : "Take a photo or choose an image"}</b><span>JPEG, PNG, or WebP · optimized for upload</span></button><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden onChange={(e) => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; void scan(file); }}/>{scanUnmatched && <div className="scan-no-match"><span className="scan-placeholder-mark">?</span><b>No catalog match</b><small>This card is not available in the identification results.</small></div>}{scanError && <p className="scan-error">{scanError}</p>}{candidates.length > 0 && <div className="scan-candidates">{candidates.map((candidate, index) => <button className={`candidate-option ${selected === candidate ? "chosen" : ""}`} key={`${candidate.game}-${candidate.set}-${candidate.cardNumber}-${index}`} onClick={() => void chooseCandidate(candidate)} disabled={priceBusy || saveBusy}><span><b>{candidate.name}</b><small>{candidate.set} · {candidate.cardNumber} · {candidate.game}</small></span><span>{selected === candidate ? (priceBusy ? "Checking price…" : marketPrice == null ? "Price unavailable" : currency(marketPrice)) : `${Math.round((candidate.confidence || 0) * 100)}% match`}</span></button>)}</div>}{selected && <form className="scan-save-form" onSubmit={addScannedCard}><div className="selected-card-note"><b>{selected.name}</b><span>{selected.set} · {selected.cardNumber}</span><strong>{priceBusy ? "Loading estimate…" : marketPrice == null ? "No estimate returned — you can still save this card." : `${currency(marketPrice)} estimated market value`}</strong></div><div className="form-grid"><label>Condition<select name="condition"><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Grade<input name="grade" defaultValue="Ungraded"/></label><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue="1"/></label><label>What you paid<input name="purchasePrice" type="number" min="0" step=".01" placeholder="Optional"/></label></div><button className="primary-button modal-submit" disabled={priceBusy || saveBusy}>{saveBusy ? "Saving…" : "Add to my collection"}<ArrowRight size={15}/></button></form>}<div className="modal-footnote"><Sparkles size={13}/> Same photo results cache for 30 days; prices cache for 6 hours.</div></>}
+      {modal === "scan" && <><div className="modal-icon"><Camera size={19}/></div><div className="section-kicker">ADD TO YOUR PRIVATE COLLECTION</div><h2>Let’s find your card.</h2><p>TCGDB identifies the card and TCG API looks up its market estimate. The photo is compressed on your device before upload.</p><button className="upload-box" disabled={scanBusy || saveBusy} onClick={() => fileInput.current?.click()}><Upload size={20}/><b>{scanBusy ? <><LoaderCircle className="spin" size={14}/> Identifying card…</> : "Take a photo or choose an image"}</b><span>JPEG, PNG, or WebP · optimized for upload</span></button><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden onChange={(e) => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; void scan(file); }}/>{scanUnmatched && <div className="scan-no-match"><span className="scan-placeholder-mark">?</span><b>No catalog match</b><small>This card is not available in the identification results.</small></div>}{scanError && <p className="scan-error">{scanError}</p>}{candidates.length > 0 && <div className="scan-candidates">{candidates.map((candidate) => <button className={`candidate-option ${selected === candidate ? "chosen" : ""}`} key={`${candidate.game}-${candidate.set}-${candidate.cardNumber}`} onClick={() => void chooseCandidate(candidate)} disabled={priceBusy || saveBusy}><span><b>{candidate.name}</b><small>{candidate.set} · {candidate.cardNumber} · {candidate.game}</small></span><span>{selected === candidate ? (priceBusy ? <><LoaderCircle className="spin" size={12}/> Checking price…</> : marketPrice == null ? "Price unavailable" : currency(marketPrice)) : `${Math.round((candidate.confidence || 0) * 100)}% match`}</span></button>)}</div>}{selected && <form className="scan-save-form" onSubmit={addScannedCard}><div className="selected-card-note"><b>{selected.name}</b><span>{selected.set} · {selected.cardNumber}</span><strong>{priceBusy ? "Loading estimate…" : marketPrice == null ? "No estimate returned — you can still save this card." : `${currency(marketPrice)} estimated market value`}</strong></div><div className="form-grid"><label>Condition<select name="condition"><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Grade<input name="grade" defaultValue="Ungraded"/></label><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue="1"/></label><label>What you paid<input name="purchasePrice" type="number" min="0" step=".01" placeholder="Optional"/></label></div><button className="primary-button modal-submit" disabled={priceBusy || saveBusy}>{saveBusy ? "Saving…" : "Add to my collection"}{saveBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button></form>}<div className="modal-footnote"><Sparkles size={13}/> Same photo results cache for 30 days; prices cache for 24 hours.</div></>}
       {modal === "cart" && <><div className="modal-icon"><ShoppingBag size={19}/></div><div className="section-kicker">YOUR BAG</div><h2>{cartRows.length ? "Ready when you are." : "Your cart is empty."}</h2>{cartRows.length ? <><div className="cart-items">{cartRows.map(({ line, listing }) => <div className="cart-item" key={listing.id}><div className="mini-card-art teal">✳</div><div className="cart-item-title"><b>{listing.card.name}</b><span>{listing.card.set_name} · {currency(salePrice(listing,line.quantity))} each</span><div className="quantity-stepper"><button onClick={() => setCartQuantity(listing.id,line.quantity-1)}>−</button><span>{line.quantity}</span><button onClick={() => setCartQuantity(listing.id,line.quantity+1)} disabled={line.quantity >= listing.quantity}>+</button></div></div><strong>{currency(salePrice(listing,line.quantity)*line.quantity)}</strong></div>)}</div><div className="cart-total"><span>Subtotal</span><b>{currency(cartTotal)}</b></div><form className="checkout-form" onSubmit={checkout}><label>Your name<input required name="name" defaultValue={user?.email?.split("@")[0] || ""}/></label><label>Contact email<input required type="email" name="email" defaultValue={user?.email || ""}/></label><label>Shipping address<textarea required name="address" minLength={5} rows={2}/></label><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Placing order…" : "Place order"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button><p className="checkout-note">This creates a pending order. The store will contact you to arrange payment and delivery.</p></form></> : <p className="empty-copy">Browse the marketplace and add a card you love.</p>}</>}
       {modal === "listing" && listingItem && <><div className="modal-icon"><Tag size={19}/></div><div className="section-kicker">SINGLE-STORE LISTING</div><h2>Set your asking price.</h2><p>Buyers see your asking price, not the private market estimate. Set an optional quantity and date rule for your discount.</p><form className="checkout-form" onSubmit={publishListing}><div className="selected-card-note"><b>{listingItem.card.name}</b><span>{listingItem.card.set_name} · {listingItem.quantity} in portfolio</span><strong>Private market estimate: {currency(Number(listingItem.card.market_value) || 0)}</strong></div><label>Asking price<input required name="askingPrice" type="number" min=".01" step=".01" defaultValue={listingItem.card.market_value || ""}/></label><div className="form-grid"><label>Discount %<input name="discountPercent" type="number" min="0" max="100" defaultValue="0"/></label><label>Minimum quantity<input name="discountMinQuantity" type="number" min="1" defaultValue="1"/></label><label>Starts at<input name="discountStartsAt" type="datetime-local"/></label><label>Ends at<input name="discountEndsAt" type="datetime-local"/></label></div><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Publishing…" : "Publish listing"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button></form></>}
       {modal === "edit" && editingItem && <><div className="modal-icon"><Tag size={19}/></div><div className="section-kicker">PRIVATE PORTFOLIO</div><h2>Edit your card.</h2><p>{editingItem.card.name} · {editingItem.card.set_name}</p><form className="checkout-form" onSubmit={saveCollectionEdit}><div className="form-grid"><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue={editingItem.quantity}/></label><label>Grade<input name="grade" defaultValue={editingItem.grade}/></label><label>Condition<select name="condition" defaultValue={editingItem.condition}><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Purchase price<input name="purchasePrice" type="number" min="0" step=".01" defaultValue={editingItem.purchase_price ?? ""}/></label></div><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Saving…" : "Save changes"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <Check size={15}/>}</button></form></>}
@@ -307,9 +313,10 @@ function CatalogGrid({ cards, collection, addingId, onAdd }: { cards: Card[]; co
 function CardArt({ card }: { card: Card }) {
   const [imageFailed, setImageFailed] = useState(false);
   const color = ["orange","yellow","purple","navy","pink","blue","violet","teal"][card.name.length % 8];
-  const hasImage = Boolean(card.image_url) && !imageFailed;
+  const imageUrl = imageFailed ? null : card.image_url;
+  const hasImage = Boolean(imageUrl);
   return <div className={`card-art ${hasImage ? "has-card-image" : `card-placeholder ${color}`}`}>
-    {hasImage ? <img src={card.image_url!} alt={`${card.name} card`} loading="lazy" onError={() => setImageFailed(true)}/> : <div className="missing-card-art"><span className="missing-card-symbol">✳</span><span className="missing-card-game">{card.game}</span><span className="missing-card-name">{card.name}</span><span className="missing-card-label">IMAGE UNAVAILABLE</span></div>}
+    {imageUrl ? <img src={imageUrl} alt={`${card.name} card`} loading="lazy" onError={() => setImageFailed(true)}/> : <div className="missing-card-art"><span className="missing-card-symbol">✳</span><span className="missing-card-game">{card.game}</span><span className="missing-card-name">{card.name}</span><span className="missing-card-label">IMAGE UNAVAILABLE</span></div>}
     <span className="art-bottom"><span>{card.rarity || card.game}</span><span>{card.card_number}</span></span>
   </div>;
 }
@@ -332,7 +339,7 @@ function ListingManager({ listings, onChange }: { listings: Listing[]; onChange:
 function AccountSkeleton() {
   return <section className="account-skeleton" aria-busy="true" aria-label="Loading your account">
     <span className="sr-only">Loading your collection…</span>
-    <div className="skeleton-stats">{Array.from({ length: 4 }, (_, i) => <div className="skeleton-block skeleton-stat" key={i}><i/><b/><small/></div>)}</div>
+    <div className="skeleton-stats">{["first", "second", "third", "fourth"].map((key) => <div className="skeleton-block skeleton-stat" key={key}><i/><b/><small/></div>)}</div>
     <div className="skeleton-dashboard"><div className="skeleton-block skeleton-chart"><i/><b/><span/><span/><span/></div><div className="skeleton-block skeleton-insight"><i/><b/><b/><small/></div></div>
     <div className="skeleton-section-heading"><i/><b/></div>
     <CardSkeleton count={4} label="Loading collection cards" />
@@ -341,6 +348,6 @@ function AccountSkeleton() {
 
 function CardSkeleton({ count, label }: { count: number; label: string }) {
   return <div className="card-grid skeleton-grid" role="status" aria-label={label}>
-    {Array.from({ length: count }, (_, i) => <div className="skeleton-block skeleton-card" key={i} aria-hidden="true"><i/><b/><small/><span/></div>)}
+    {Array.from({ length: count }, (_, index) => `skeleton-${index}`).map((key) => <div className="skeleton-block skeleton-card" key={key} aria-hidden="true"><i/><b/><small/><span/></div>)}
   </div>;
 }

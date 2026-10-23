@@ -21,15 +21,24 @@ export async function getCachedPokemonCardImage(game: string, setName: string, c
 
     const localId = requestedNumber.split("/")[0].trim();
     if (!localId) return null;
-    const cardUrl = `https://api.tcgdex.net/v2/en/sets/${encodeURIComponent(set.id)}/${encodeURIComponent(localId)}`;
-    const cardResponse = await fetch(cardUrl, { next: { revalidate: 60 * 60 * 24 * 30 } });
-    if (!cardResponse.ok) return null;
-    const card = await cardResponse.json();
-    if (normalized(String(card.name || "")) === "" || normalized(String(card.set?.name || "")) !== normalized(requestedSet)) return null;
-    if (normalized(String(card.localId || "")) !== normalized(localId)) return null;
-    if (typeof card.image !== "string" || !card.image.startsWith("https://assets.tcgdex.net/")) return null;
-    return `${card.image.replace(/\/$/, "")}/low.webp`;
-  }, ["tcgdex-pokemon-card-image-v1"], { revalidate: 60 * 60 * 24 * 30 });
+    const alternateLocalId = /^\d+$/.test(localId) ? String(Number(localId)) : localId;
+    const localIds = [...new Set([localId, alternateLocalId])];
+    for (const candidateId of localIds) {
+      const cardUrl = `https://api.tcgdex.net/v2/en/sets/${encodeURIComponent(set.id)}/${encodeURIComponent(candidateId)}`;
+      const cardResponse = await fetch(cardUrl, { next: { revalidate: 60 * 60 * 24 * 30 } });
+      if (!cardResponse.ok) continue;
+      const card = await cardResponse.json();
+      const normalizedLocalId = (value: unknown) => {
+        const id = normalized(String(value || ""));
+        return /^\d+$/.test(id) ? String(Number(id)) : id;
+      };
+      if (normalized(String(card.name || "")) === "" || normalized(String(card.set?.name || "")) !== normalized(requestedSet)) continue;
+      if (normalizedLocalId(card.localId) !== normalizedLocalId(localId)) continue;
+      if (typeof card.image !== "string" || !card.image.startsWith("https://assets.tcgdex.net/")) continue;
+      return `${card.image.replace(/\/$/, "")}/low.webp`;
+    }
+    return null;
+  }, ["tcgdex-pokemon-card-image-v2"], { revalidate: 60 * 60 * 24 * 30 });
 
   try { return await resolveImage(setName.trim(), cardNumber.trim()); }
   catch { return null; }

@@ -4,6 +4,7 @@ import { badRequest, getApiSession, unauthorized } from "@/lib/api-session";
 import { createSupabaseAdminClient } from "@/lib/supabase-admin";
 import { getCachedTcgPrice, getTcgApiKey } from "@/lib/tcg-pricing";
 import { getCachedPokemonCardImage } from "@/lib/tcgdex-image";
+import { getApiTcgKey, getCachedApiTcgImage } from "@/lib/apitcg-image";
 
 export async function GET() {
   const session = await getApiSession();
@@ -14,19 +15,29 @@ export async function GET() {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   let data = initialData;
   const staleCards = new Map<string, any>();
+  const cardsWithoutImages = new Map<string, any>();
   const cutoff = Date.now() - 6 * 60 * 60 * 1000;
   for (const item of data || []) {
     const card = Array.isArray(item.card) ? item.card[0] : item.card;
     if (card && (!card.price_updated_at || new Date(card.price_updated_at).getTime() < cutoff)) staleCards.set(card.id, card);
+    if (card && !card.image_url) cardsWithoutImages.set(card.id, card);
   }
-  if (getTcgApiKey() && staleCards.size) {
+  if ((getTcgApiKey() && staleCards.size) || (getApiTcgKey() && cardsWithoutImages.size)) {
     const admin = createSupabaseAdminClient();
-    await Promise.all([...staleCards.values()].slice(0, 8).map(async (card) => {
-      try {
-        const priced = await getCachedTcgPrice(card.name, card.set_name, card.card_number, card.game);
-        if (typeof priced.marketValue === "number") await admin.from("card_catalog").update({ market_value: priced.marketValue, price_updated_at: priced.priceUpdatedAt || new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", card.id);
-      } catch { /* Keep the last known price if the provider is unavailable or its daily quota is exhausted. */ }
-    }));
+    await Promise.all([
+      ...[...staleCards.values()].slice(0, 8).map(async (card) => {
+        try {
+          const priced = await getCachedTcgPrice(card.name, card.set_name, card.card_number, card.game);
+          if (typeof priced.marketValue === "number") await admin.from("card_catalog").update({ market_value: priced.marketValue, price_updated_at: priced.priceUpdatedAt || new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", card.id);
+        } catch { /* Keep the last known price if the provider is unavailable or its daily quota is exhausted. */ }
+      }),
+      ...[...cardsWithoutImages.values()].slice(0, 8).map(async (card) => {
+        try {
+          const imageUrl = await getCachedApiTcgImage(card.game, card.name, card.set_name, card.card_number);
+          if (imageUrl) await admin.from("card_catalog").update({ image_url: imageUrl, updated_at: new Date().toISOString() }).eq("id", card.id).is("image_url", null);
+        } catch { /* Keep the card visible with its existing placeholder if the image provider is unavailable. */ }
+      }),
+    ]);
     const refreshed = await session.supabase.from("collection_items")
       .select("id,quantity,condition,grade,purchase_price,acquired_at,created_at,card:card_catalog(id,catalog_key,name,set_name,card_number,game,rarity,image_url,market_value,price_updated_at)")
       .eq("owner_id", session.user.id).gt("quantity", 0).order("created_at", { ascending: false });
@@ -49,7 +60,7 @@ export async function POST(request: Request) {
   if (typeof body.imageUrl === "string") {
     try {
       const candidateUrl = new URL(body.imageUrl);
-      if (candidateUrl.protocol === "https:" && candidateUrl.hostname === "assets.tcgdex.net") imageUrl = candidateUrl.toString().slice(0, 500);
+      if (candidateUrl.protocol === "https:" && ["assets.tcgdex.net", "tcgplayer-cdn.tcgplayer.com"].includes(candidateUrl.hostname)) imageUrl = candidateUrl.toString().slice(0, 500);
     } catch { /* Ignore malformed or untrusted catalog-image URLs. */ }
   }
   const grade = typeof body.grade === "string" ? body.grade.slice(0, 50) : "Ungraded";
@@ -66,7 +77,7 @@ export async function POST(request: Request) {
     const marketValue = priceResult?.marketValue ?? null;
     const catalogKey = createHash("sha256").update(`${game}|${set}|${cardNumber}|${name}`.toLowerCase()).digest("hex");
     const admin = createSupabaseAdminClient();
-    const resolvedImageUrl = imageUrl || await getCachedPokemonCardImage(game, set, cardNumber);
+    const resolvedImageUrl = await getCachedApiTcgImage(game, name, set, cardNumber) || imageUrl || await getCachedPokemonCardImage(game, set, cardNumber);
     const { data: existingCatalog } = await admin.from("card_catalog").select("id,image_url,market_value,price_updated_at").eq("catalog_key", catalogKey).maybeSingle();
     const { data: catalog, error: catalogError } = await admin.from("card_catalog").upsert({
       catalog_key: catalogKey, name, set_name: set, card_number: cardNumber, game, rarity,

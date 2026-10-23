@@ -80,6 +80,7 @@ export default function Home() {
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [marketPrice, setMarketPrice] = useState<number | null>(null);
   const [priceBusy, setPriceBusy] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null);
   const [listingItem, setListingItem] = useState<PortfolioItem | null>(null);
@@ -199,7 +200,7 @@ export default function Home() {
 
   async function scan(file?: File) {
     if (!file) return;
-    setCameraActive(false); setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setScanSuccess(""); setScanUnmatched(false); setScanBusy(true);
+    setCameraActive(false); setCandidates([]); setSelected(null); setMarketPrice(null); setImageBusy(false); setScanError(""); setScanSuccess(""); setScanUnmatched(false); setScanBusy(true);
     try {
       const compressed = await compressPhoto(file); const form = new FormData(); form.append("image", compressed);
       const response = await trackedFetch("/api/tcg/identify", { method: "POST", body: form });
@@ -235,20 +236,27 @@ export default function Home() {
     if (blob) void scan(new File([blob], "card-scan.jpg", { type: "image/jpeg" }));
   }
   function resetScanner() {
-    setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setScanSuccess(""); setScanUnmatched(false); setShowScanDetails(false); setCameraActive(true);
+    setCandidates([]); setSelected(null); setMarketPrice(null); setImageBusy(false); setScanError(""); setScanSuccess(""); setScanUnmatched(false); setShowScanDetails(false); setCameraActive(true);
   }
   function openScanner() {
     resetScanner();
     setModal("scan");
   }
   async function chooseCandidate(candidate: Candidate) {
-    setSelected(candidate); setMarketPrice(null); setPriceBusy(true); setScanError("");
+    setSelected(candidate); setMarketPrice(null); setPriceBusy(true); setImageBusy(true); setScanError("");
     try {
-      const result = await api("/api/tcg/price", "POST", { cardName: candidate.name, set: candidate.set, cardNumber: candidate.cardNumber, game: candidate.game });
-      const price = result.marketValue;
-      if (typeof price === "number") setMarketPrice(price);
+      const details = { cardName: candidate.name, set: candidate.set, cardNumber: candidate.cardNumber, game: candidate.game };
+      const [priceResult, imageResult] = await Promise.allSettled([
+        api("/api/tcg/price", "POST", details),
+        api("/api/tcg/image", "POST", details),
+      ]);
+      if (priceResult.status === "fulfilled" && typeof priceResult.value.marketValue === "number") setMarketPrice(priceResult.value.marketValue);
+      else if (priceResult.status === "rejected") setScanError(priceResult.reason instanceof Error ? priceResult.reason.message : "Could not look up this card's price.");
+      if (imageResult.status === "fulfilled" && typeof imageResult.value.imageUrl === "string") {
+        setSelected((current) => current === candidate ? { ...candidate, imageUrl: imageResult.value.imageUrl } : current);
+      }
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : "Could not look up this card's price."); }
-    finally { setPriceBusy(false); }
+    finally { setPriceBusy(false); setImageBusy(false); }
   }
   async function addScannedCard(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!selected) return;
@@ -366,7 +374,7 @@ export default function Home() {
         {!cameraActive && !scanBusy && scanError && !scanUnmatched && candidates.length === 0 && <div className="scan-empty-match"><span className="scan-placeholder-mark">!</span><b>Could not identify this card</b><span>{scanError}</span><button className="primary-button" onClick={resetScanner}><Camera size={15}/> Try again</button></div>}
         {!cameraActive && !scanBusy && scanUnmatched && <div className="scan-empty-match"><span className="scan-placeholder-mark">?</span><b>No exact match found</b><span>{scanError || "Try a clearer photo with the full card number visible."}</span><button className="primary-button" onClick={resetScanner}><Camera size={15}/> Scan again</button></div>}
         {!cameraActive && !scanBusy && candidates.length > 0 && selected && <div className="scan-review">
-          <div className="match-card-preview">{selected.imageUrl ? <img src={selected.imageUrl} alt={`${selected.name} card`} /> : <div className="match-card-placeholder"><Sparkles size={24}/><span>{selected.game}</span></div>}<div><div className="scan-match-badge"><Check size={12}/> MATCH FOUND</div><h3>{selected.name}</h3><p>{selected.set} · {selected.cardNumber}</p><strong>{priceBusy ? <><LoaderCircle className="spin" size={13}/> Checking market price…</> : marketPrice == null ? "Market estimate unavailable" : `${currency(marketPrice)} market estimate`}</strong></div></div>
+          <div className="match-card-preview">{selected.imageUrl ? <img src={selected.imageUrl} alt={`${selected.name} card`} /> : <div className="match-card-placeholder">{imageBusy ? <LoaderCircle className="spin" size={24}/> : <Sparkles size={24}/>}<span>{imageBusy ? "Loading artwork" : selected.game}</span></div>}<div><div className="scan-match-badge"><Check size={12}/> MATCH FOUND</div><h3>{selected.name}</h3><p>{selected.set} · {selected.cardNumber}</p><strong>{priceBusy ? <><LoaderCircle className="spin" size={13}/> Checking market price…</> : marketPrice == null ? "Market estimate unavailable" : `${currency(marketPrice)} market estimate`}</strong></div></div>
           {candidates.length > 1 && <div className="scan-alternates"><div className="scan-alternates-heading">{candidates.length} possible matches <span>Tap to change</span></div><div className="scan-candidates">{candidates.map((candidate) => <button className={`candidate-option ${selected === candidate ? "chosen" : ""}`} key={`${candidate.game}-${candidate.set}-${candidate.cardNumber}`} onClick={() => void chooseCandidate(candidate)} disabled={priceBusy || saveBusy}><span><b>{candidate.name}</b><small>{candidate.set} · {candidate.cardNumber} · {candidate.game}</small></span><span>{selected === candidate ? "Selected" : `${Math.round((candidate.confidence || 0) * 100)}%`}</span></button>)}</div></div>}
           {scanError && <p className="scan-error">{scanError}</p>}
           <form className="scan-save-form" onSubmit={addScannedCard}><div className="form-grid"><label>Condition<select name="condition" defaultValue="Near Mint"><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue="1"/></label></div>

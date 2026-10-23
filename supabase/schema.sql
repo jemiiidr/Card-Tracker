@@ -53,6 +53,17 @@ create table if not exists public.collection_items (
   acquired_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  collection_item_id uuid references public.collection_items(id) on delete set null,
+  description text not null check (char_length(description) between 1 and 160),
+  category text not null check (category in ('Card purchase','Grading','Supplies','Shipping','Fees','Other')),
+  amount numeric(12,2) not null check (amount > 0),
+  expense_date date not null default current_date,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 create table if not exists public.listings (
   id uuid primary key default gen_random_uuid(),
   card_id uuid not null references public.card_catalog(id) on delete restrict,
@@ -103,6 +114,7 @@ create table if not exists public.portfolio_snapshots (
 
 create index if not exists collection_owner_created_idx on public.collection_items(owner_id, created_at desc);
 create index if not exists collection_card_idx on public.collection_items(card_id);
+create index if not exists expenses_owner_date_idx on public.expenses(owner_id, expense_date desc, created_at desc);
 create index if not exists cardhaus_listings_active_created_idx on public.listings(status, created_at desc);
 create unique index if not exists listing_inventory_item_unique on public.listings(inventory_item_id) where inventory_item_id is not null;
 create index if not exists cardhaus_orders_buyer_created_idx on public.orders(buyer_id, created_at desc);
@@ -142,6 +154,7 @@ for each row execute procedure public.prevent_store_owner_self_promotion();
 alter table public.profiles enable row level security;
 alter table public.card_catalog enable row level security;
 alter table public.collection_items enable row level security;
+alter table public.expenses enable row level security;
 alter table public.listings enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
@@ -159,6 +172,9 @@ using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_
 with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_store_owner));
 drop policy if exists "portfolio is private to owner" on public.collection_items;
 create policy "portfolio is private to owner" on public.collection_items for all to authenticated
+using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists "users manage own expenses" on public.expenses;
+create policy "users manage own expenses" on public.expenses for all to authenticated
 using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 drop policy if exists "active listings are visible" on public.listings;
 create policy "active listings are visible" on public.listings for select to authenticated

@@ -173,6 +173,69 @@
 @keyframes request-pulse{50%{box-shadow:0 0 0 5px #edf3e9;opacity:.65;}}
 @media(max-width:760px){.api-request-status:not(.is-loading){display:none;}.top-actions{gap:6px;}}
 @media(prefers-reduced-motion:reduce){.live-dot.request-active{animation:none;}}
+/* Collection sheet and expense ledger */
+.sheet-scroll{width:100%;overflow:auto;border:1px solid var(--line);border-radius:9px;background:#fff;overscroll-behavior-x:contain}
+.data-sheet{width:100%;min-width:940px;border-collapse:collapse;text-align:left;font-size:11px}
+.data-sheet:not(.expense-table){min-width:1080px;table-layout:fixed}
+.data-sheet:not(.expense-table) th:nth-child(1){width:18%}.data-sheet:not(.expense-table) th:nth-child(2){width:9%}.data-sheet:not(.expense-table) th:nth-child(3){width:7%}.data-sheet:not(.expense-table) th:nth-child(4){width:7%}.data-sheet:not(.expense-table) th:nth-child(5){width:13%}.data-sheet:not(.expense-table) th:nth-child(6){width:13%}.data-sheet:not(.expense-table) th:nth-child(7){width:12%}.data-sheet:not(.expense-table) th:nth-child(8){width:10%}.data-sheet:not(.expense-table) th:nth-child(9){width:11%}
+.data-sheet th{position:sticky;top:0;padding:12px 11px;background:#f5f6f0;color:#85877e;font-size:9px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.data-sheet td{padding:10px 11px;border-top:1px solid #edeee8;color:#62665e;white-space:nowrap}
+.data-sheet tbody tr:hover{background:#fbfcf9}
+.data-sheet .sheet-card-name{display:flex;align-items:center;gap:9px;min-width:170px;color:var(--ink)}
+.sheet-card-name img{width:29px;height:40px;object-fit:cover;border-radius:3px;background:#edf0e9}
+.sheet-card-name span{display:grid;gap:3px}.sheet-card-name small{color:#8b8e84;font-size:9px}
+.data-sheet input,.data-sheet select{max-width:120px;min-width:72px;height:32px;padding:0 7px;border:1px solid var(--line);border-radius:5px;background:white;color:var(--ink);font:inherit}
+.data-sheet:not(.expense-table) input,.data-sheet:not(.expense-table) select{width:100%;max-width:none;min-width:0}
+.data-sheet .sheet-row-editing{background:#f8faf5}
+.sheet-actions{display:flex;align-items:center;gap:8px}
+.data-sheet td.sheet-actions{display:table-cell;white-space:nowrap;vertical-align:middle}
+.sheet-actions button{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:5px 7px;border:0;border-radius:4px;background:transparent;color:#477152;font:inherit;cursor:pointer}
+.sheet-actions button:hover{background:#edf3e9}.sheet-actions button:disabled{opacity:.55;cursor:wait}
+.sheet-empty{padding:18px;color:#85877e;text-align:center;font-size:12px}
+.expense-summary{display:flex;align-items:stretch;gap:12px;margin:0 0 18px}
+.expense-summary>div{display:grid;gap:8px;min-width:180px;padding:15px 17px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.expense-summary>div span{color:#85877e;font-size:9px;letter-spacing:.08em}.expense-summary>div b{color:var(--ink);font-family:var(--serif);font-size:23px;font-weight:500}
+.expense-summary p{align-self:center;margin:0 0 0 auto;max-width:240px;color:#85877e;font-size:10px;line-height:1.6}
+.expense-form{margin-bottom:20px;padding:17px;border:1px solid var(--line);border-radius:9px;background:#fff}
+.expense-form h3{margin:0 0 13px;color:var(--ink);font-family:var(--serif);font-size:18px;font-weight:500}
+.expense-fields{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:12px;align-items:end}
+.expense-fields label{display:grid;gap:6px;color:#73766d;font-size:10px;font-weight:600}
+.expense-fields input,.expense-fields select{width:100%;height:39px;padding:0 9px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:inherit;font-weight:400;outline-color:#789271}
+.expense-form-actions{display:flex;align-items:center;gap:10px}.expense-table{min-width:700px}.expense-table td{padding-top:12px;padding-bottom:12px}.expense-loading{display:flex;align-items:center;justify-content:center;gap:9px;padding:34px;color:#73766d;font-size:12px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:760px){.expense-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px}.expense-summary>div{min-width:0;padding:12px}.expense-summary>div b{font-size:20px}.expense-summary p{grid-column:1/-1;margin:2px 0 0;max-width:none}.expense-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.expense-fields label:last-of-type{grid-column:1/-1}.expense-form{padding:13px}.data-sheet{font-size:10px}.data-sheet th,.data-sheet td{padding:9px 8px}}
+@media(max-width:420px){.expense-fields{grid-template-columns:1fr}.expense-fields label:last-of-type{grid-column:auto}.expense-form-actions{flex-wrap:wrap}}
+@media(max-width:760px){.sidebar nav{justify-content:flex-start;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none}.sidebar nav::-webkit-scrollbar{display:none}.sidebar nav .nav-link{flex:0 0 40px}.sidebar .profile{flex:0 0 36px}.sidebar-signout{width:34px;height:42px}}
+.digital-card-media{display:block;width:100%;padding:0;border:0;background:transparent;text-align:inherit;cursor:zoom-in}
+.digital-card-media:focus-visible{outline:3px solid #789271;outline-offset:3px;border-radius:7px}
+.catalog-detail-container{max-width:760px!important}
+.catalog-detail-modal{display:grid;grid-template-columns:minmax(190px,.8fr) minmax(0,1.2fr);align-items:start;gap:26px;padding:12px 6px 4px}
+.catalog-detail-art .card-art{width:100%;height:auto;aspect-ratio:5/7;border-radius:9px;overflow:hidden}
+.catalog-detail-info{min-width:0;padding:7px 8px 2px 0}
+.catalog-detail-info h2{margin:9px 0 5px;font-family:var(--serif);font-size:29px;font-weight:500;line-height:1.15}
+.catalog-detail-info>p{margin:0;color:#85877e;font-size:12px}
+.catalog-detail-info dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.catalog-detail-info dl div{display:grid;gap:4px}.catalog-detail-info dt{color:#85877e;font-size:9px;text-transform:uppercase;letter-spacing:.07em}.catalog-detail-info dd{margin:0;color:var(--ink);font-size:12px;font-weight:600}
+.catalog-owned-copies{margin:0 0 16px}.catalog-owned-copies h3{display:flex;justify-content:space-between;margin:0 0 8px;font-size:11px}.catalog-owned-copies h3 span{color:#85877e;font-size:10px;font-weight:400}
+.catalog-owned-copies>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid #edeee8}.catalog-owned-copies>div span{display:grid;gap:3px}.catalog-owned-copies>div b{font-size:11px}.catalog-owned-copies>div small{color:#85877e;font-size:9px}.catalog-owned-copies .text-button{flex:none;padding:5px}
+.catalog-detail-add{width:100%;min-height:43px}
+.modal-back-button{display:inline-flex;align-items:center;gap:5px;margin:1px 0 2px;padding:3px 0;border:0;background:transparent;color:#52714f;font-size:11px;font-weight:600}
+.modal-back-button:hover{color:#31563c;text-decoration:underline}
+.scan-success-toast{top:18px;left:50%;bottom:auto;z-index:40;width:max-content;max-width:min(520px,calc(100vw - 28px));padding:13px 18px;gap:10px;background:#f3f7ef;color:#3e6645;border:1px solid #dce8d7;line-height:1.4;transform:translateX(-50%);animation:success-toast-in .18s ease-out both}
+@keyframes success-toast-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}
+@media(max-width:760px){.scan-success-toast{top:calc(12px + env(safe-area-inset-top));bottom:auto}}
+@media(max-width:600px){.catalog-detail-container{max-height:90dvh!important}.catalog-detail-modal{grid-template-columns:minmax(0,1fr);gap:17px;padding:8px 2px 2px}.catalog-detail-art{width:min(55vw,220px);margin:0 auto}.catalog-detail-info{padding:0}.catalog-detail-info h2{font-size:25px}.catalog-detail-info dl{margin:15px 0}}
+.catalog-detail-modal{align-items:stretch}
+.catalog-detail-art{display:flex;align-self:stretch;min-width:0}
+.catalog-detail-art .card-art{width:100%;height:100%;min-height:460px;aspect-ratio:auto;margin:0;}
+@media(max-width:600px){.catalog-detail-art{display:block;min-height:0}.catalog-detail-art .card-art{width:100%;height:auto;min-height:0;aspect-ratio:5/7;margin:0}}
+.catalog-detail-container{overflow-y:auto;overscroll-behavior:contain}
+.catalog-detail-modal{grid-template-columns:minmax(0,1fr);align-items:start;gap:22px;padding:12px 6px 6px}
+.catalog-detail-art{display:block;width:min(280px,100%);height:auto;min-height:0;margin:0 auto}
+.catalog-detail-art .card-art{width:100%;height:auto;min-height:0;aspect-ratio:5/7;margin:0}
+.catalog-detail-info{padding:0 8px 4px}
+@media(min-width:601px){.catalog-detail-container{max-height:min(90dvh,820px)!important;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}}
+@media(max-width:600px){.catalog-detail-modal{grid-template-columns:minmax(0,1fr);gap:18px;padding:8px 2px 4px}.catalog-detail-art{width:min(62vw,240px);margin:0 auto}.catalog-detail-info{padding:0}}
 /* Standard trading cards are about 2.5 × 3.5 in (5:7). Keep the full artwork visible at every grid size. */
 .card-art{height:auto;aspect-ratio:5/7}
 .card-art img{object-fit:contain;z-index:0;background:#e8e9e2}

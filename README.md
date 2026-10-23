@@ -8,6 +8,7 @@ Cardhaus is a single-store trading card shop and private collection tracker buil
 - TCGDB photo identification and TCG API card-price lookup, with a card selection step before saving. A matched card can still be saved if TCG API has no current estimate for it; its portfolio value remains unknown until a price is available.
 - Exact-match Pokémon card artwork from the free TCGdex catalog; cards without a matching catalog image show an explicit placeholder.
 - A private portfolio with quantity, condition, grade, acquisition cost, and estimated market value.
+- An editable spreadsheet-style card sheet and private expense ledger with monthly and all-time totals.
 - A shared digital card catalog populated by identified cards, with artwork, search, game filters, and one-tap add-to-portfolio actions. This catalog grows from cards identified in Cardhaus; it is not a complete TCGDB card search because TCGDB's public API exposes identification rather than a catalog-search endpoint.
 - One store marketplace. Buyers see the store's asking price and discounts, never a collector's private portfolio or the card catalog's market estimate.
 - Cart and checkout that creates a pending order and reserves available stock. This project does not include online payment processing; the store arranges payment and delivery with the buyer.
@@ -37,7 +38,7 @@ npm install
 
 Create a project at [supabase.com](https://supabase.com). In Supabase **Project Settings → API**, copy the Project URL, anon/public key, and service-role key.
 
-Run [`supabase/schema.sql`](supabase/schema.sql) once in **Supabase Dashboard → SQL Editor**. This creates the tables, indexes, RLS policies, order functions, private photo bucket policy, and profile trigger. New signups receive a profile automatically. If the app reports that `public.profiles` is missing from the schema cache, the SQL has not completed against this project; run it in the same Supabase project whose URL is configured in `.env.local`. The script asks PostgREST to reload its schema after creation.
+Run [`supabase/schema.sql`](supabase/schema.sql) once in **Supabase Dashboard → SQL Editor**. This creates the tables, indexes, RLS policies, order functions, private photo bucket policy, and profile trigger. New signups receive a profile automatically. If you already ran the schema before adding the expense tracker, run [`supabase/migrations/20261023_expenses.sql`](supabase/migrations/20261023_expenses.sql) once in the same SQL Editor. If the app reports that `public.profiles` is missing from the schema cache, the SQL has not completed against this project; run it in the same Supabase project whose URL is configured in `.env.local`. The script asks PostgREST to reload its schema after creation.
 
 In **Authentication → URL Configuration**, set the local site URL to `http://localhost:3000`. For email confirmation, add `http://localhost:3000/auth/callback` to the allowed redirect URLs. You can disable email confirmation for a private development project if you want immediate sign-in; production should use your intended confirmation policy.
 

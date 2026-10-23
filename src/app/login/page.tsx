@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, LockKeyhole } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { z } from "zod";
 
@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,5 +45,22 @@ export default function LoginPage() {
     finally { setBusy(false); }
   }
 
-  return <main className="auth-screen"><div className="auth-card"><Link className="brand auth-brand" href="/"><span className="brand-icon">c.</span><span>cardhaus<span className="brand-dot">.</span></span></Link><div className="auth-icon"><LockKeyhole size={18}/></div><div className="section-kicker">YOUR COLLECTION, YOUR SPACE</div><h1>{mode === "signin" ? "Welcome back." : "Join the collectors."}</h1><p>{mode === "signin" ? "Sign in to see your collection and shop the market." : "Create an account to track cards and find your next favorite."}</p><form onSubmit={submit} className="auth-form">{mode === "signup" && <label>Name<input required value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name"/></label>}<label>Email<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"/></label><label>Password<input required minLength={8} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"}/></label>{message && <div className="auth-message">{message}</div>}<button className="primary-button auth-submit" disabled={busy}>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}<ArrowRight size={15}/></button></form><div className="auth-switch">{mode === "signin" ? "New to Cardhaus?" : "Already have an account?"}<button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMessage(""); }}>{mode === "signin" ? "Create account" : "Sign in"}</button></div><div className="auth-private"><LockKeyhole size={12}/> Your collection is private to your account.</div></div><div className="auth-side-note">A good day to<br/><em>collect something.</em><span>Find your people. Keep what you love.</span></div></main>;
+  return <main className="auth-screen">
+    <div className="auth-card">
+      <Link className="brand auth-brand" href="/"><span className="brand-icon">c.</span><span>cardhaus<span className="brand-dot">.</span></span></Link>
+      <div className="section-kicker">YOUR COLLECTION, YOUR SPACE</div>
+      <h1>{mode === "signin" ? "Welcome back." : "Join the collectors."}</h1>
+      <p>{mode === "signin" ? "Sign in to see your collection and shop the market." : "Create an account to track cards and find your next favorite."}</p>
+      <form onSubmit={submit} className="auth-form">
+        {mode === "signup" && <label>Name<input required value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name"/></label>}
+        <label>Email<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"/></label>
+        <label>Password<span className="password-field"><input required minLength={8} type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"}/><button type="button" className="password-toggle" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={16} aria-hidden="true"/> : <Eye size={16} aria-hidden="true"/>}</button></span></label>
+        {message && <div className="auth-message">{message}</div>}
+        <button className="primary-button auth-submit" disabled={busy}>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}<ArrowRight size={15}/></button>
+      </form>
+      <div className="auth-switch">{mode === "signin" ? "New to Cardhaus?" : "Already have an account?"}<button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMessage(""); }}>{mode === "signin" ? "Create account" : "Sign in"}</button></div>
+      <div className="auth-private"><LockKeyhole size={12}/> Your collection is private to your account.</div>
+    </div>
+    <div className="auth-side-note">A good day to<br/><em>collect something.</em><span>Find your people. Keep what you love.</span></div>
+  </main>;
 }

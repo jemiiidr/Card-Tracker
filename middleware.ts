@@ -28,11 +28,15 @@ export async function middleware(request: NextRequest) {
     },
   });
   const { data: { user } } = await supabase.auth.getUser();
-  const isLogin = request.nextUrl.pathname === "/login";
+  const pathname = request.nextUrl.pathname;
+  const isLogin = pathname === "/login";
   if (!user && !isLogin) {
-    const redirect = NextResponse.redirect(new URL("/login", request.url));
-    if (isApi) redirect.headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");
-    return redirect;
+    if (isApi) return NextResponse.json({ error: "Sign in to continue." }, {
+      status: 401,
+      headers: { "Cache-Control": "private, no-store, max-age=0, must-revalidate" },
+    });
+    if (pathname === "/") return response;
+    return NextResponse.redirect(new URL("/login", request.url));
   }
   if (user && isLogin) return NextResponse.redirect(new URL("/", request.url));
   if (isApi) response.headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");

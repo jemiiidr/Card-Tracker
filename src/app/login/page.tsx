@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { z } from "zod";
+
+const credentialsSchema = z.object({ email: z.string().trim().email().max(254), password: z.string().min(8).max(128), displayName: z.string().trim().min(2).max(60).optional() });
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,14 +26,16 @@ export default function LoginPage() {
   async function submit(event: FormEvent) {
     event.preventDefault(); setMessage("");
     if (!supabase) { setMessage("Supabase is not configured. Add its URL and anon key to .env.local, then restart the server."); return; }
+    const parsed = credentialsSchema.safeParse({ email, password, ...(mode === "signup" ? { displayName } : {}) });
+    if (!parsed.success) { setMessage(parsed.error.issues[0]?.message || "Check your account details."); return; }
     setBusy(true);
     try {
       if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName }, emailRedirectTo: `${window.location.origin}/auth/callback` } });
+        const { data, error } = await supabase.auth.signUp({ email: parsed.data.email, password: parsed.data.password, options: { data: { display_name: parsed.data.displayName }, emailRedirectTo: `${window.location.origin}/auth/callback` } });
         if (error) throw error;
         if (!data.session) { setMessage("Check your email to confirm your account, then sign in."); return; }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
         if (error) throw error;
       }
       const requested = new URLSearchParams(window.location.search).get("next");

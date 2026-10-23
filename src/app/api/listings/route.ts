@@ -1,5 +1,22 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { badRequest, getApiSession, unauthorized } from "@/lib/api-session";
+
+const listingCreateSchema = z.object({
+  collectionItemId: z.string().trim().min(1).max(80),
+  askingPrice: z.coerce.number().finite().positive(),
+  discountPercent: z.coerce.number().min(0).max(100).default(0),
+  discountMinQuantity: z.coerce.number().int().min(1).max(99).default(1),
+  discountStartsAt: z.string().max(50).optional().nullable(),
+  discountEndsAt: z.string().max(50).optional().nullable(),
+}).strict();
+const listingUpdateSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  status: z.enum(["active", "withdrawn"]).optional(),
+  askingPrice: z.coerce.number().finite().positive().optional(),
+  discountPercent: z.coerce.number().min(0).max(100).optional(),
+  discountMinQuantity: z.coerce.number().int().min(1).max(99).optional(),
+}).strict().refine((value) => Object.keys(value).length > 1, "Provide at least one listing change.");
 
 const ownerCheck = async (supabase: any, userId: string) => {
   const { data, error } = await supabase.from("profiles").select("is_store_owner").eq("id", userId).single();
@@ -21,12 +38,15 @@ export async function POST(request: Request) {
   const session = await getApiSession();
   if (!session) return unauthorized();
   if (!(await ownerCheck(session.supabase, session.user.id))) return NextResponse.json({ error: "Store owner access required." }, { status: 403 });
-  let body: any;
-  try { body = await request.json(); } catch { return badRequest("Invalid request body."); }
+  let payload: unknown;
+  try { payload = await request.json(); } catch { return badRequest("Invalid request body."); }
+  const parsed = listingCreateSchema.safeParse(payload);
+  if (!parsed.success) return badRequest(parsed.error.issues[0]?.message || "Check the listing details.");
+  const body = parsed.data;
   const itemId = typeof body.collectionItemId === "string" ? body.collectionItemId : "";
   const askingPrice = Number(body.askingPrice);
-  const discountPercent = Math.min(100, Math.max(0, Number(body.discountPercent) || 0));
-  const discountMinQuantity = Math.max(1, Math.min(99, Number(body.discountMinQuantity) || 1));
+  const discountPercent = body.discountPercent;
+  const discountMinQuantity = body.discountMinQuantity;
   if (!itemId || !Number.isFinite(askingPrice) || askingPrice <= 0) return badRequest("Select a card and enter a positive asking price.");
   const startsDate = body.discountStartsAt ? new Date(body.discountStartsAt) : null;
   const endsDate = body.discountEndsAt ? new Date(body.discountEndsAt) : null;
@@ -54,9 +74,11 @@ export async function PATCH(request: Request) {
   const session = await getApiSession();
   if (!session) return unauthorized();
   if (!(await ownerCheck(session.supabase, session.user.id))) return NextResponse.json({ error: "Store owner access required." }, { status: 403 });
-  let body: any;
-  try { body = await request.json(); } catch { return badRequest("Invalid request body."); }
-  if (typeof body.id !== "string") return badRequest("Listing ID is required.");
+  let payload: unknown;
+  try { payload = await request.json(); } catch { return badRequest("Invalid request body."); }
+  const parsed = listingUpdateSchema.safeParse(payload);
+  if (!parsed.success) return badRequest(parsed.error.issues[0]?.message || "Check the listing changes.");
+  const body = parsed.data;
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.status !== undefined) {
     if (!["active","withdrawn"].includes(body.status)) return badRequest("Invalid listing status.");
@@ -64,11 +86,10 @@ export async function PATCH(request: Request) {
   }
   if (body.askingPrice !== undefined) {
     const value = Number(body.askingPrice);
-    if (!Number.isFinite(value) || value <= 0) return badRequest("Asking price must be positive.");
     updates.asking_price = value;
   }
-  if (body.discountPercent !== undefined) updates.discount_percent = Math.min(100, Math.max(0, Number(body.discountPercent) || 0));
-  if (body.discountMinQuantity !== undefined) updates.discount_min_quantity = Math.max(1, Math.min(99, Number(body.discountMinQuantity) || 1));
+  if (body.discountPercent !== undefined) updates.discount_percent = body.discountPercent;
+  if (body.discountMinQuantity !== undefined) updates.discount_min_quantity = body.discountMinQuantity;
   const { data, error } = await session.supabase.from("listings").update(updates).eq("id", body.id).eq("seller_id", session.user.id).select("id").maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: "Listing not found." }, { status: 404 });

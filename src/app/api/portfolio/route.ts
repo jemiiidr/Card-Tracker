@@ -1,10 +1,24 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { badRequest, getApiSession, unauthorized } from "@/lib/api-session";
 import { createSupabaseAdminClient } from "@/lib/supabase-admin";
 import { getCachedTcgPrice, getTcgApiKey } from "@/lib/tcg-pricing";
 import { getCachedPokemonCardImage } from "@/lib/tcgdex-image";
 import { getApiTcgKey, getCachedApiTcgImage } from "@/lib/apitcg-image";
+
+const purchasePriceSchema = z.preprocess((value) => value === "" || value == null ? null : Number(value), z.number().finite().nonnegative().nullable());
+const portfolioCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120), set: z.string().trim().min(1).max(120),
+  cardNumber: z.string().trim().min(1).max(40), game: z.string().trim().min(1).max(80),
+  rarity: z.string().max(100).nullable().optional(), imageUrl: z.string().max(2048).nullable().optional(),
+  grade: z.string().max(50).nullable().optional(), condition: z.string().max(50).nullable().optional(),
+  quantity: z.coerce.number().int().min(1).max(99).optional(), purchasePrice: purchasePriceSchema.optional(),
+}).strict();
+const portfolioUpdateSchema = z.object({
+  id: z.string().min(1).max(80), quantity: z.coerce.number().int().min(1).max(99).optional(),
+  purchasePrice: purchasePriceSchema.optional(), grade: z.string().max(50).optional(), condition: z.string().max(50).optional(),
+}).strict().refine((value) => Object.keys(value).some((key) => key !== "id"), "Provide at least one change.");
 
 export async function GET() {
   const session = await getApiSession();
@@ -49,8 +63,11 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  let body: any;
-  try { body = await request.json(); } catch { return badRequest("Invalid request body."); }
+  let payload: unknown;
+  try { payload = await request.json(); } catch { return badRequest("Invalid request body."); }
+  const parsed = portfolioCreateSchema.safeParse(payload);
+  if (!parsed.success) return badRequest(parsed.error.issues[0]?.message || "Check the card details.");
+  const body = parsed.data;
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
   const set = typeof body.set === "string" ? body.set.trim().slice(0, 120) : "";
   const cardNumber = typeof body.cardNumber === "string" ? body.cardNumber.trim().slice(0, 40) : "";
@@ -66,7 +83,7 @@ export async function POST(request: Request) {
   const grade = typeof body.grade === "string" ? body.grade.slice(0, 50) : "Ungraded";
   const condition = typeof body.condition === "string" ? body.condition.slice(0, 50) : "Near Mint";
   const quantity = Math.min(99, Math.max(1, Number(body.quantity) || 1));
-  const purchasePrice = body.purchasePrice === "" || body.purchasePrice == null ? null : Number(body.purchasePrice);
+  const purchasePrice = body.purchasePrice ?? null;
   if (!name || !set || !cardNumber || !game) return badRequest("Card name, set, number, and game are required.");
   if (purchasePrice != null && (!Number.isFinite(purchasePrice) || purchasePrice < 0)) return badRequest("Purchase price must be zero or more.");
 
@@ -100,13 +117,16 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  let body: any;
-  try { body = await request.json(); } catch { return badRequest("Invalid request body."); }
+  let payload: unknown;
+  try { payload = await request.json(); } catch { return badRequest("Invalid request body."); }
+  const parsed = portfolioUpdateSchema.safeParse(payload);
+  if (!parsed.success) return badRequest(parsed.error.issues[0]?.message || "Check the card details.");
+  const body = parsed.data;
   const id = typeof body.id === "string" ? body.id : "";
   if (!id) return badRequest("Collection item is required.");
   const updates: Record<string, unknown> = {};
   if (body.quantity !== undefined) updates.quantity = Math.max(1, Math.min(99, Number(body.quantity) || 1));
-  if (body.purchasePrice !== undefined) updates.purchase_price = body.purchasePrice === "" ? null : Number(body.purchasePrice);
+  if (body.purchasePrice !== undefined) updates.purchase_price = body.purchasePrice;
   if (body.grade !== undefined) updates.grade = String(body.grade).slice(0, 50);
   if (body.condition !== undefined) updates.condition = String(body.condition).slice(0, 50);
   if (updates.purchase_price !== undefined && updates.purchase_price !== null && (!Number.isFinite(updates.purchase_price) || Number(updates.purchase_price) < 0)) return badRequest("Purchase price must be zero or more.");

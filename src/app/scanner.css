@@ -46,3 +46,6 @@
   .scanner-frame{inset:8% 17%}.scan-gallery-button{right:0;width:42px;height:42px;justify-content:center;padding:0}.scan-gallery-button span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
   .shutter-button{width:56px;height:56px}.shutter-button span{width:40px;height:40px}.match-card-preview{gap:11px;padding:10px}.match-card-preview>img,.match-card-placeholder{width:76px;height:104px}
 }
+/* Standard trading-card proportions keep the whole card visible in scan previews. */
+.match-card-preview>img,.match-card-placeholder{height:auto;aspect-ratio:5/7;object-fit:contain}
+@media(max-width:760px){.match-card-preview>img,.match-card-placeholder{height:auto}}

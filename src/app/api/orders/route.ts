@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { badRequest, getApiSession, unauthorized } from "@/lib/api-session";
+
+const checkoutSchema = z.object({
+  items: z.array(z.object({ listingId: z.string().trim().min(1).max(80), quantity: z.coerce.number().int().min(1).max(99) }).strict()).min(1).max(30),
+  name: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(200),
+  address: z.string().trim().min(5).max(800),
+}).strict();
 
 export async function GET() {
   const session = await getApiSession();
@@ -14,13 +22,12 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await getApiSession();
   if (!session) return unauthorized();
-  let body: any;
-  try { body = await request.json(); } catch { return badRequest("Invalid checkout details."); }
-  const items = Array.isArray(body.items) ? body.items.slice(0, 30).map((item: any) => ({ listing_id: String(item.listingId || ""), quantity: Math.max(1, Math.min(99, Number(item.quantity) || 1)) })) : [];
-  const buyerName = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
-  const buyerEmail = typeof body.email === "string" ? body.email.trim().slice(0, 200) : "";
-  const address = typeof body.address === "string" ? body.address.trim().slice(0, 800) : "";
-  if (!items.length || items.some((item: any) => !item.listing_id) || !buyerName || !buyerEmail || address.length < 5) return badRequest("Enter your contact and shipping details and keep one or more items in your cart.");
+  let payload: unknown;
+  try { payload = await request.json(); } catch { return badRequest("Invalid checkout details."); }
+  const parsed = checkoutSchema.safeParse(payload);
+  if (!parsed.success) return badRequest(parsed.error.issues[0]?.message || "Enter valid checkout details.");
+  const { items: checkoutItems, name: buyerName, email: buyerEmail, address } = parsed.data;
+  const items = checkoutItems.map((item) => ({ listing_id: item.listingId, quantity: item.quantity }));
   const { data, error } = await session.supabase.rpc("place_order", { p_items: items, p_buyer_name: buyerName, p_buyer_email: buyerEmail, p_shipping_address: address });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ orderId: data, status: "pending" });

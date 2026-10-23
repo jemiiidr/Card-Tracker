@@ -1,11 +1,11 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Camera, Check, ChevronDown, CircleDollarSign, LayoutDashboard, LoaderCircle, LogOut, PackageCheck, Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, Tag, TrendingUp, Upload, UserRound, X } from "lucide-react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Camera, Check, ChevronDown, CircleDollarSign, LayoutDashboard, LoaderCircle, LogOut, PackageCheck, Plus, Search, Settings, ShoppingBag, SlidersHorizontal, Sparkles, Tag, TrendingUp, Upload, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type View = "Overview" | "Card catalog" | "Marketplace" | "My collection" | "My orders" | "Store manager";
+type View = "Overview" | "Card catalog" | "Marketplace" | "My collection" | "My orders" | "Store manager" | "Settings";
 type Card = { id: string; name: string; set_name: string; card_number: string; game: string; rarity: string | null; image_url: string | null; market_value: number | null; price_updated_at: string | null };
 type PortfolioItem = { id: string; quantity: number; condition: string; grade: string; purchase_price: number | null; card: Card };
 type Listing = { id: string; asking_price: number; quantity: number; discount_percent: number; discount_min_quantity: number; discount_starts_at: string | null; discount_ends_at: string | null; status: string; card: Card };
@@ -44,6 +44,10 @@ export default function Home() {
   const router = useRouter();
   const [view, setView] = useState<View>("Overview");
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsNotice, setSettingsNotice] = useState("");
+  const [settingsError, setSettingsError] = useState("");
   const [isOwner, setIsOwner] = useState(false);
   const [collection, setCollection] = useState<PortfolioItem[]>([]);
   const [catalog, setCatalog] = useState<Card[]>([]);
@@ -142,7 +146,7 @@ export default function Home() {
     try {
       const meRes = await trackedFetch("/api/me", { cache: "no-store" });
       if (!meRes.ok) throw new Error((await meRes.json()).error || "Please sign in again.");
-      const me = await meRes.json(); setUser(me.user); setIsOwner(Boolean(me.profile?.is_store_owner));
+      const me = await meRes.json(); setUser(me.user); setDisplayName(me.profile?.display_name || ""); setIsOwner(Boolean(me.profile?.is_store_owner));
       const jobs = [trackedFetch("/api/portfolio", { cache: "no-store" }), trackedFetch("/api/marketplace", { cache: "no-store" }), trackedFetch("/api/dashboard", { cache: "no-store" }), trackedFetch("/api/orders", { cache: "no-store" })];
       if (me.profile?.is_store_owner) jobs.push(trackedFetch("/api/listings", { cache: "no-store" }));
       const responses = await Promise.all(jobs);
@@ -191,6 +195,19 @@ export default function Home() {
     const value = await response.json(); if (!response.ok) throw new Error(value.error || "Request failed."); return value;
   }
   async function signOut() { if (supabase) await supabase.auth.signOut(); router.replace("/login"); router.refresh(); }
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setSettingsBusy(true); setSettingsError(""); setSettingsNotice("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      const result = await api("/api/settings", "PATCH", { displayName: String(form.get("displayName") || ""), email: String(form.get("email") || ""), password: String(form.get("password") || "") });
+      setDisplayName(result.displayName);
+      if (result.email) setUser((current) => current ? { ...current, email: result.email } : current);
+      formElement.reset();
+      setSettingsNotice(result.emailChangePending ? "Profile saved. Confirm the email change using the link sent to your new address." : "Your account details were saved.");
+    } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : "Could not save your settings."); }
+    finally { setSettingsBusy(false); }
+  }
   const filteredMarket = useMemo(() => market.filter((listing) => {
     const text = `${listing.card.name} ${listing.card.set_name} ${listing.card.card_number} ${listing.card.game}`.toLowerCase();
     return text.includes(query.toLowerCase()) && (filter === "all" || listing.discount_percent > 0);
@@ -263,7 +280,7 @@ export default function Home() {
     const form = new FormData(event.currentTarget);
     setSaveBusy(true);
     try {
-      const saved = await api("/api/portfolio", "POST", { name: selected.name, set: selected.set, cardNumber: selected.cardNumber, game: selected.game, rarity: selected.rarity, imageUrl: selected.imageUrl, condition: form.get("condition"), grade: form.get("grade"), quantity: form.get("quantity"), purchasePrice: form.get("purchasePrice") });
+      const saved = await api("/api/portfolio", "POST", { name: selected.name, set: selected.set, cardNumber: selected.cardNumber, game: selected.game, rarity: selected.rarity ?? null, imageUrl: selected.imageUrl ?? null, condition: form.get("condition") ?? "Near Mint", grade: form.get("grade") || "Ungraded", quantity: form.get("quantity") ?? "1", purchasePrice: form.get("purchasePrice") ?? "" });
       setScanSuccess(saved.priceUnavailable ? "Added to your collection. No market estimate is available yet." : "Added to your collection.");
       setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setShowScanDetails(false); setCameraActive(true);
       await loadData(true);
@@ -322,15 +339,15 @@ export default function Home() {
   const ownerOrders = isOwner ? orders : [];
   return <main className="app-shell">
     <aside className="sidebar"><a className="brand" href="#home"><span className="brand-icon">c.</span><span>cardhaus<span className="brand-dot">.</span></span></a>
-      <div className="workspace"><div className="avatar">{user?.email?.[0]?.toUpperCase() || "C"}</div><div><b>{isOwner ? "Cardhaus store" : "Collector account"}</b><small>{user?.email}</small></div><ChevronDown size={15}/></div>
-      <span className="nav-caption">WORKSPACE</span><nav>{([ ["Overview", LayoutDashboard], ["Card catalog", BookOpen], ["Marketplace", ShoppingBag], ["My collection", Tag], ["My orders", PackageCheck], ...(isOwner ? [["Store manager", TrendingUp] as const] : []) ] as const).map(([label, Icon]) => <button key={label} className={`nav-link ${view === label ? "active" : ""}`} onClick={() => { setView(label as View); setQuery(""); }}><Icon size={17}/>{label === "Card catalog" ? "Catalog" : label}{label === "Marketplace" && <span className="nav-count">{market.length}</span>}{label === "My orders" && <span className="nav-count">{orders.length}</span>}</button>)}</nav>
+      <div className="workspace"><div className="avatar">{(displayName || user?.email || "C")[0]?.toUpperCase()}</div><div><b>{displayName || user?.email?.split("@")[0] || "Collector account"}</b><small>{isOwner ? "Store owner" : "Collector account"}</small></div></div>
+      <span className="nav-caption">WORKSPACE</span><nav>{([ ["Overview", LayoutDashboard], ["Card catalog", BookOpen], ["Marketplace", ShoppingBag], ["My collection", Tag], ["My orders", PackageCheck], ...(isOwner ? [["Store manager", TrendingUp] as const] : []), ["Settings", Settings] ] as const).map(([label, Icon]) => <button key={label} title={label} className={`nav-link ${view === label ? "active" : ""}`} onClick={() => { setView(label as View); setQuery(""); }}><Icon size={17}/>{label === "Card catalog" ? "Catalog" : label === "My collection" ? "Collection" : label === "My orders" ? "Orders" : label === "Store manager" ? "Store" : label}{label === "Marketplace" && <span className="nav-count">{market.length}</span>}{label === "My orders" && <span className="nav-count">{orders.length}</span>}</button>)}</nav>
       <div className="sidebar-card"><div className="side-spark"><Sparkles size={15}/></div><b>Your cards,<br/>your own little corner.</b><p>Keep your portfolio private, see what it’s worth, and shop one collector-owned store.</p><button onClick={openScanner}><Plus size={13}/> Add a card</button><div className="side-watermark">✳</div></div>
-      <div className="profile"><div className="avatar profile-avatar">{user?.email?.[0]?.toUpperCase() || "C"}</div><div><b>{user?.email}</b><small>{isOwner ? "Store owner" : "Collector"}</small></div><button className="logout-button" title="Sign out" onClick={signOut}><LogOut size={15}/></button></div>
+      <div className="profile"><button className="logout-button sidebar-signout" onClick={signOut}><LogOut size={15}/> Sign out</button></div>
     </aside>
 
     <section className="main-area"><header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view}</b></div><div className="top-actions"><span className={`live-dot ${apiPending ? "request-active" : ""}`}/><span className={apiPending ? "api-request-status is-loading" : "api-request-status"} aria-live="polite">{apiPending ? <><LoaderCircle className="spin" size={12}/> {apiPending > 1 ? `${apiPending} requests in progress…` : "Request in progress…"}</> : busy ? "Loading your account…" : "Your collection is private"}</span><button className="icon-button notification" aria-label="Cart" onClick={() => setModal("cart")}><ShoppingBag size={18}/>{cart.length > 0 && <i/>}</button></div></header>
       <div className="content">
-        <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>{view === "Marketplace" ? "THE CARDHAUS STORE" : view === "Store manager" ? "SINGLE STORE CONTROL PANEL" : view === "Card catalog" ? "DIGITAL CARD LIBRARY" : "YOUR COLLECTION AT A GLANCE"}</div><h1>{view === "Overview" ? <>A good day to<br/><em>collect something.</em></> : view === "Card catalog" ? <>Browse the<br/><em>card catalog.</em></> : view === "Marketplace" ? <>Find your next<br/><em>favorite card.</em></> : view === "Store manager" ? <>Run your<br/><em>little card shop.</em></> : view === "My orders" ? <>Your orders,<br/><em>all in one place.</em></> : <>Your cards,<br/><em>beautifully tracked.</em></>}</h1><p className="intro">{view === "Overview" ? "A little snapshot of the cards you love and what they’re worth." : view === "Card catalog" ? "Explore digital card entries, view their artwork, and add copies to your private collection." : view === "Marketplace" ? "One store, thoughtful listings, prices set by the shop." : view === "Store manager" ? "Manage listings, discounts, inventory, and orders." : view === "My orders" ? "Check order status or review the cards you’ve purchased." : "Your collection is private. Only you can see these cards."}</p></div><div className="welcome-actions">{view === "Marketplace" && <button className="primary-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button>}{(view === "Overview" || view === "My collection" || view === "Card catalog") && <button className="primary-button scan-button" onClick={openScanner}><Camera size={16}/> Scan a card <span className="button-plus">+</span></button>}</div></section>
+        <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>{view === "Marketplace" ? "THE CARDHAUS STORE" : view === "Store manager" ? "SINGLE STORE CONTROL PANEL" : view === "Card catalog" ? "DIGITAL CARD LIBRARY" : view === "Settings" ? "ACCOUNT PREFERENCES" : "YOUR COLLECTION AT A GLANCE"}</div><h1>{view === "Overview" ? <>A good day to<br/><em>collect something.</em></> : view === "Card catalog" ? <>Browse the<br/><em>card catalog.</em></> : view === "Marketplace" ? <>Find your next<br/><em>favorite card.</em></> : view === "Store manager" ? <>Run your<br/><em>little card shop.</em></> : view === "My orders" ? <>Your orders,<br/><em>all in one place.</em></> : view === "Settings" ? <>Your account,<br/><em>your details.</em></> : <>Your cards,<br/><em>beautifully tracked.</em></>}</h1><p className="intro">{view === "Overview" ? "A little snapshot of the cards you love and what they’re worth." : view === "Card catalog" ? "Explore digital card entries, view their artwork, and add copies to your private collection." : view === "Marketplace" ? "One store, thoughtful listings, prices set by the shop." : view === "Store manager" ? "Manage listings, discounts, inventory, and orders." : view === "My orders" ? "Check order status or review the cards you’ve purchased." : view === "Settings" ? "Update your profile, email address, and password." : "Your collection is private. Only you can see these cards."}</p></div><div className="welcome-actions">{view === "Marketplace" && <button className="primary-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button>}{(view === "Overview" || view === "My collection" || view === "Card catalog") && <button className="primary-button scan-button" onClick={openScanner}><Camera size={16}/> Scan a card <span className="button-plus">+</span></button>}</div></section>
 
         {error && <div className="page-error">{error}{!user && <button onClick={() => router.push("/login")}>Sign in</button>}</div>}
         {busy && <AccountSkeleton />}
@@ -348,6 +365,8 @@ export default function Home() {
         {!busy && view === "Marketplace" && <section className="collection-section full-collection"><div className="section-heading"><div><div className="section-kicker">GOOD CARDS, ONE GOOD SHOP</div><h2>Shop the marketplace <span className="subtle-count">{filteredMarket.length} listings</span></h2></div><button className="primary-button compact-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button></div><div className="filter-row"><label className="search-box"><Search size={16}/><input placeholder="Search cards, sets, games…" value={query} onChange={(e) => setQuery(e.target.value)}/></label><button className="filter-button" onClick={() => setFilter(filter === "all" ? "sale" : "all")}><SlidersHorizontal size={15}/>{filter === "sale" ? "Discounted" : "Filters"}<ChevronDown size={14}/></button><button className={`chip ${filter === "sale" ? "selected" : ""}`} onClick={() => setFilter(filter === "sale" ? "all" : "sale")}>On sale</button></div><MarketGrid listings={filteredMarket} cart={cart} onAdd={addCart}/></section>}
 
         {!busy && view === "My orders" && <section className="collection-section full-collection"><div className="section-heading"><div><div className="section-kicker">ORDER HISTORY</div><h2>{isOwner ? "Store orders" : "Your orders"} <span className="subtle-count">{orders.length} total</span></h2></div></div><OrderList orders={orders} isOwner={isOwner} onAction={changeOrder}/></section>}
+
+        {!busy && view === "Settings" && <section className="settings-panel"><div className="section-heading"><div><div className="section-kicker">PROFILE & SECURITY</div><h2>Account settings</h2></div></div><form className="settings-form" onSubmit={saveSettings}><label>Display name<input name="displayName" defaultValue={displayName} required minLength={2} maxLength={60} autoComplete="name"/></label><label>Email address<input name="email" type="email" defaultValue={user?.email || ""} required autoComplete="email"/></label><div className="settings-divider"/><h3>Change password</h3><p>Leave this empty if you don’t want to change your password.</p><label>New password<input name="password" type="password" minLength={8} maxLength={128} autoComplete="new-password" placeholder="At least 8 characters"/></label>{settingsError && <div className="page-error">{settingsError}</div>}{settingsNotice && <div className="settings-success" role="status">{settingsNotice}</div>}<button className="primary-button" disabled={settingsBusy}>{settingsBusy ? <><LoaderCircle className="spin" size={14}/> Saving…</> : "Save account settings"}</button></form></section>}
 
         {!busy && view === "Store manager" && isOwner && <><section className="stats-grid"><Stat title="ACTIVE LISTINGS" value={`${ownerListings.filter((x) => x.status === "active").length}`} icon={<Tag size={16}/>} tone="green" note="Visible to signed-in shoppers"/><Stat title="ASKING VALUE" value={currency(ownerListings.filter((x) => x.status === "active").reduce((sum, x) => sum + x.asking_price * x.quantity, 0))} icon={<CircleDollarSign size={17}/>} tone="purple" note="Before eligible discounts"/><Stat title="PENDING ORDERS" value={`${ownerOrders.filter((x) => x.status === "pending").length}`} icon={<ShoppingBag size={16}/>} tone="yellow" note="Arrange payment and delivery"/><Stat title="COMPLETED SALES" value={currency(dashboard?.realizedProfit || 0)} icon={<TrendingUp size={16}/>} tone="orange" note="Realized profit after recorded cost"/></section><section className="collection-section"><div className="section-heading"><div><div className="section-kicker">YOUR SINGLE STOREFRONT</div><h2>Store listings</h2></div><button className="text-button" onClick={() => setView("My collection")}>Choose inventory <ArrowRight size={14}/></button></div><ListingManager listings={ownerListings} onChange={changeListing}/></section><section className="collection-section"><div className="section-heading"><div><div className="section-kicker">FULFILLMENT</div><h2>Recent orders</h2></div><button className="text-button" onClick={() => setView("My orders")}>All orders <ArrowRight size={14}/></button></div><OrderList orders={ownerOrders.slice(0,5)} isOwner onAction={changeOrder}/></section></>}
       </div>

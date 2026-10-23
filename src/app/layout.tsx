@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./scanner.css";
 
 export const metadata: Metadata = {
   title: "Cardhaus — Your cards, your market",

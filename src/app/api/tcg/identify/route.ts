@@ -10,9 +10,8 @@ const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export async function POST(request: Request) {
   if (!(await getApiSession())) return unauthorized();
-  const legacyPriceKey = process.env.PRICE_API_KEY;
-  const apiKey = process.env.TCGDB_API_KEY || (legacyPriceKey && !legacyPriceKey.startsWith("tcg_live_") ? legacyPriceKey : undefined);
-  if (!apiKey) return NextResponse.json({ error: "Set TCGDB_API_KEY for photo identification. A TCG API tcg_live_ key cannot authenticate with TCGDB." }, { status: 503 });
+  const apiKey = process.env.VISION_API_KEY?.trim();
+  if (!apiKey) return NextResponse.json({ error: "Set VISION_API_KEY to an active TCGDB API key for camera identification." }, { status: 503 });
   const incoming = await request.formData();
   const image = incoming.get("image");
   if (!(image instanceof File)) return NextResponse.json({ error: "Choose a card photo to identify." }, { status: 400 });
@@ -31,11 +30,17 @@ export async function POST(request: Request) {
         body: JSON.stringify({ imageData: base64 }), cache: "no-store",
       });
       const body = await response.json();
+      if (response.status === 401) {
+        const error = new Error("TCGDB rejected VISION_API_KEY. Create or regenerate an API key in your TCGDB profile, then update VISION_API_KEY and restart the app.");
+        error.name = "InvalidVisionApiKeyError";
+        throw error;
+      }
       if (!response.ok || !body?.success) throw new Error(body?.error || `TCGDB identification failed (${response.status}).`);
       return body;
     }, ["tcgdb-identify-v1", accountFingerprint, fingerprint], { revalidate: 60 * 60 * 24 * 30, tags: ["tcgdb-identify"] });
     return NextResponse.json(await identifyCached());
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "TCGDB identification failed." }, { status: 502 });
+    const invalidKey = error instanceof Error && error.name === "InvalidVisionApiKeyError";
+    return NextResponse.json({ error: error instanceof Error ? error.message : "TCGDB identification failed." }, { status: invalidKey ? 503 : 502 });
   }
 }

@@ -19,7 +19,7 @@ Cardhaus is a single-store trading card shop and private collection tracker buil
 
 - Node.js 20 or newer and npm.
 - A Supabase project.
-- A TCGDB API key for photo identification and a TCG API key for market prices. Set `TCGDB_API_KEY` and `TCGAPI_KEY`; the app also accepts `POKEMON_TCG_API_KEY` for TCG API pricing. A legacy non-`tcg_live_` `PRICE_API_KEY` can still supply the TCGDB scanner key.
+- A TCGDB Vision API key for photo identification and a TCG API key for market prices. Set `VISION_API_KEY` and `TCGAPI_KEY`; the app also accepts `POKEMON_TCG_API_KEY` for TCG API pricing.
 
 ## Run locally
 
@@ -55,11 +55,11 @@ Set these values in `.env.local`. `NEXT_PUBLIC_SUPABASE_URL` must be the project
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
-TCGDB_API_KEY=your-tcgdb-api-key
+VISION_API_KEY=your-tcgdb-vision-api-key
 TCGAPI_KEY=your-tcgapi-key
 ```
 
-`TCGDB_API_KEY` is used only for TCGDB photo identification. `TCGAPI_KEY` (or `POKEMON_TCG_API_KEY`) is used for TCG API prices; `PRICE_API_KEY` remains a migration fallback for prices and for TCGDB identification when it is not a `tcg_live_` TCG API key. Never prefix provider keys or the service-role key with `NEXT_PUBLIC_`, commit `.env.local`, or expose these secrets to the browser. The service-role key bypasses RLS and is used only by authenticated server routes for shared catalog writes and price refreshes.
+`VISION_API_KEY` is used only for TCGDB photo identification. `TCGAPI_KEY` (or `POKEMON_TCG_API_KEY`) is used for TCG API prices; `PRICE_API_KEY` is accepted as a migration fallback for prices only. Never prefix provider keys or the service-role key with `NEXT_PUBLIC_`, commit `.env.local`, or expose these secrets to the browser. The service-role key bypasses RLS and is used only by authenticated server routes for shared catalog writes and price refreshes.
 
 ### 4. Start the app and create the store owner
 
@@ -98,7 +98,7 @@ Supabase provides PostgreSQL, Auth, and Storage. The schema defines a shared car
 ## Deploy to Vercel
 
 1. Push the project to a Git repository and import it into [Vercel](https://vercel.com/new).
-2. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `TCGDB_API_KEY`, and `TCGAPI_KEY` as Vercel environment variables for the environments you use. Keep service keys private.
+2. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `VISION_API_KEY`, and `TCGAPI_KEY` as Vercel environment variables for the environments you use. Keep service keys private.
 3. Deploy with the standard Next.js build settings.
 4. In Supabase **Authentication → URL Configuration**, set the production site URL to your Vercel domain and add `https://YOUR_DOMAIN/auth/callback` to allowed redirect URLs. Add preview URLs if you use preview deployments.
 5. Apply `supabase/schema.sql` to the Supabase project if you have not already, then designate the store-owner account with the SQL above.

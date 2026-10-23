@@ -66,6 +66,12 @@ export default function Home() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState<"scan" | "cart" | "listing" | "edit" | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
+  const [cameraActive, setCameraActive] = useState(true);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [scanSuccess, setScanSuccess] = useState("");
+  const [showScanDetails, setShowScanDetails] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -79,9 +85,49 @@ export default function Home() {
   const [listingItem, setListingItem] = useState<PortfolioItem | null>(null);
   const [filter, setFilter] = useState<"all" | "sale">("all");
   const fileInput = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const catalogLoaded = useRef(false);
   const catalogOffset = useRef(0);
   const catalogRequest = useRef(0);
+
+  useEffect(() => {
+    if (modal !== "scan" || !cameraActive) return;
+    let cancelled = false;
+    setCameraStarting(true);
+    setCameraReady(false);
+    setCameraError("");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Live camera is not available in this browser. Choose a photo to scan instead.");
+      setCameraStarting(false);
+      return;
+    }
+    void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((track) => {
+            track.stop();
+          });
+          return;
+        }
+        cameraStreamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        setCameraStarting(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCameraError("Allow camera access to scan live, or choose a photo from your device.");
+          setCameraStarting(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+      cameraStreamRef.current?.getTracks().forEach((track) => {
+        track.stop();
+      });
+      cameraStreamRef.current = null;
+    };
+  }, [modal, cameraActive]);
 
   const trackedFetch = useCallback(async (input: RequestInfo | URL, init?: RequestInit) => {
     setApiPending((count) => count + 1);
@@ -153,7 +199,7 @@ export default function Home() {
 
   async function scan(file?: File) {
     if (!file) return;
-    setModal("scan"); setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setScanUnmatched(false); setScanBusy(true);
+    setCameraActive(false); setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setScanSuccess(""); setScanUnmatched(false); setScanBusy(true);
     try {
       const compressed = await compressPhoto(file); const form = new FormData(); form.append("image", compressed);
       const response = await trackedFetch("/api/tcg/identify", { method: "POST", body: form });
@@ -173,6 +219,28 @@ export default function Home() {
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : "Could not identify this card."); }
     finally { setScanBusy(false); }
   }
+  async function captureCard() {
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("This browser could not capture the camera frame. Choose a photo to scan instead.");
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (blob) void scan(new File([blob], "card-scan.jpg", { type: "image/jpeg" }));
+  }
+  function resetScanner() {
+    setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setScanSuccess(""); setScanUnmatched(false); setShowScanDetails(false); setCameraActive(true);
+  }
+  function openScanner() {
+    resetScanner();
+    setModal("scan");
+  }
   async function chooseCandidate(candidate: Candidate) {
     setSelected(candidate); setMarketPrice(null); setPriceBusy(true); setScanError("");
     try {
@@ -188,7 +256,9 @@ export default function Home() {
     setSaveBusy(true);
     try {
       const saved = await api("/api/portfolio", "POST", { name: selected.name, set: selected.set, cardNumber: selected.cardNumber, game: selected.game, rarity: selected.rarity, imageUrl: selected.imageUrl, condition: form.get("condition"), grade: form.get("grade"), quantity: form.get("quantity"), purchasePrice: form.get("purchasePrice") });
-      setModal(null); await loadData(true); notify(saved.priceUnavailable ? "Card added. TCG API has no current price estimate for this card." : "Added to your private collection.");
+      setScanSuccess(saved.priceUnavailable ? "Added to your collection. No market estimate is available yet." : "Added to your collection.");
+      setCandidates([]); setSelected(null); setMarketPrice(null); setScanError(""); setShowScanDetails(false); setCameraActive(true);
+      await loadData(true);
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : "Could not save card."); }
     finally { setSaveBusy(false); }
   }
@@ -246,13 +316,13 @@ export default function Home() {
     <aside className="sidebar"><a className="brand" href="#home"><span className="brand-icon">c.</span><span>cardhaus<span className="brand-dot">.</span></span></a>
       <div className="workspace"><div className="avatar">{user?.email?.[0]?.toUpperCase() || "C"}</div><div><b>{isOwner ? "Cardhaus store" : "Collector account"}</b><small>{user?.email}</small></div><ChevronDown size={15}/></div>
       <span className="nav-caption">WORKSPACE</span><nav>{([ ["Overview", LayoutDashboard], ["Card catalog", BookOpen], ["Marketplace", ShoppingBag], ["My collection", Tag], ["My orders", PackageCheck], ...(isOwner ? [["Store manager", TrendingUp] as const] : []) ] as const).map(([label, Icon]) => <button key={label} className={`nav-link ${view === label ? "active" : ""}`} onClick={() => { setView(label as View); setQuery(""); }}><Icon size={17}/>{label === "Card catalog" ? "Catalog" : label}{label === "Marketplace" && <span className="nav-count">{market.length}</span>}{label === "My orders" && <span className="nav-count">{orders.length}</span>}</button>)}</nav>
-      <div className="sidebar-card"><div className="side-spark"><Sparkles size={15}/></div><b>Your cards,<br/>your own little corner.</b><p>Keep your portfolio private, see what it’s worth, and shop one collector-owned store.</p><button onClick={() => setModal("scan")}><Plus size={13}/> Add a card</button><div className="side-watermark">✳</div></div>
+      <div className="sidebar-card"><div className="side-spark"><Sparkles size={15}/></div><b>Your cards,<br/>your own little corner.</b><p>Keep your portfolio private, see what it’s worth, and shop one collector-owned store.</p><button onClick={openScanner}><Plus size={13}/> Add a card</button><div className="side-watermark">✳</div></div>
       <div className="profile"><div className="avatar profile-avatar">{user?.email?.[0]?.toUpperCase() || "C"}</div><div><b>{user?.email}</b><small>{isOwner ? "Store owner" : "Collector"}</small></div><button className="logout-button" title="Sign out" onClick={signOut}><LogOut size={15}/></button></div>
     </aside>
 
     <section className="main-area"><header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view}</b></div><div className="top-actions"><span className={`live-dot ${apiPending ? "request-active" : ""}`}/><span className={apiPending ? "api-request-status is-loading" : "api-request-status"} aria-live="polite">{apiPending ? <><LoaderCircle className="spin" size={12}/> {apiPending > 1 ? `${apiPending} requests in progress…` : "Request in progress…"}</> : busy ? "Loading your account…" : "Your collection is private"}</span><button className="icon-button notification" aria-label="Cart" onClick={() => setModal("cart")}><ShoppingBag size={18}/>{cart.length > 0 && <i/>}</button></div></header>
       <div className="content">
-        <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>{view === "Marketplace" ? "THE CARDHAUS STORE" : view === "Store manager" ? "SINGLE STORE CONTROL PANEL" : view === "Card catalog" ? "DIGITAL CARD LIBRARY" : "YOUR COLLECTION AT A GLANCE"}</div><h1>{view === "Overview" ? <>A good day to<br/><em>collect something.</em></> : view === "Card catalog" ? <>Browse the<br/><em>card catalog.</em></> : view === "Marketplace" ? <>Find your next<br/><em>favorite card.</em></> : view === "Store manager" ? <>Run your<br/><em>little card shop.</em></> : view === "My orders" ? <>Your orders,<br/><em>all in one place.</em></> : <>Your cards,<br/><em>beautifully tracked.</em></>}</h1><p className="intro">{view === "Overview" ? "A little snapshot of the cards you love and what they’re worth." : view === "Card catalog" ? "Explore digital card entries, view their artwork, and add copies to your private collection." : view === "Marketplace" ? "One store, thoughtful listings, prices set by the shop." : view === "Store manager" ? "Manage listings, discounts, inventory, and orders." : view === "My orders" ? "Check order status or review the cards you’ve purchased." : "Your collection is private. Only you can see these cards."}</p></div><div className="welcome-actions">{view === "Marketplace" && <button className="primary-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button>}{(view === "Overview" || view === "My collection" || view === "Card catalog") && <button className="primary-button scan-button" onClick={() => setModal("scan")}><Camera size={16}/> Scan a card <span className="button-plus">+</span></button>}</div></section>
+        <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>{view === "Marketplace" ? "THE CARDHAUS STORE" : view === "Store manager" ? "SINGLE STORE CONTROL PANEL" : view === "Card catalog" ? "DIGITAL CARD LIBRARY" : "YOUR COLLECTION AT A GLANCE"}</div><h1>{view === "Overview" ? <>A good day to<br/><em>collect something.</em></> : view === "Card catalog" ? <>Browse the<br/><em>card catalog.</em></> : view === "Marketplace" ? <>Find your next<br/><em>favorite card.</em></> : view === "Store manager" ? <>Run your<br/><em>little card shop.</em></> : view === "My orders" ? <>Your orders,<br/><em>all in one place.</em></> : <>Your cards,<br/><em>beautifully tracked.</em></>}</h1><p className="intro">{view === "Overview" ? "A little snapshot of the cards you love and what they’re worth." : view === "Card catalog" ? "Explore digital card entries, view their artwork, and add copies to your private collection." : view === "Marketplace" ? "One store, thoughtful listings, prices set by the shop." : view === "Store manager" ? "Manage listings, discounts, inventory, and orders." : view === "My orders" ? "Check order status or review the cards you’ve purchased." : "Your collection is private. Only you can see these cards."}</p></div><div className="welcome-actions">{view === "Marketplace" && <button className="primary-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button>}{(view === "Overview" || view === "My collection" || view === "Card catalog") && <button className="primary-button scan-button" onClick={openScanner}><Camera size={16}/> Scan a card <span className="button-plus">+</span></button>}</div></section>
 
         {error && <div className="page-error">{error}{!user && <button onClick={() => router.push("/login")}>Sign in</button>}</div>}
         {busy && <AccountSkeleton />}
@@ -263,9 +333,9 @@ export default function Home() {
           <section className="collection-section"><div className="section-heading"><div><div className="section-kicker">PRIVATE TO YOU</div><h2>Recently added <span className="subtle-count">{collection.length} entries</span></h2></div><button className="text-button" onClick={() => setView("My collection")}>View collection <ArrowRight size={14}/></button></div><PortfolioGrid items={collection.slice(0,4)} isOwner={isOwner} onEdit={(item) => { setEditingItem(item); setModal("edit"); }} onList={(item) => { setListingItem(item); setModal("listing"); }} onRemove={removeCollectionItem}/></section>
         </>}
 
-        {!busy && view === "My collection" && <section className="collection-section full-collection"><div className="section-heading"><div><div className="section-kicker">JUST FOR YOUR EYES</div><h2>Your collection <span className="subtle-count">{collection.length} entries</span></h2></div><button className="primary-button compact-button" onClick={() => setModal("scan")}><Camera size={15}/> Scan a card</button></div><div className="filter-row"><label className="search-box"><Search size={16}/><input placeholder="Search your cards…" value={query} onChange={(e) => setQuery(e.target.value)}/></label><span className="private-tag"><UserRound size={13}/> Private portfolio</span></div><PortfolioGrid items={collection.filter((item) => `${item.card.name} ${item.card.set_name} ${item.card.game}`.toLowerCase().includes(query.toLowerCase()))} isOwner={isOwner} onEdit={(item) => { setEditingItem(item); setModal("edit"); }} onList={(item) => { setListingItem(item); setModal("listing"); }} onRemove={removeCollectionItem}/></section>}
+        {!busy && view === "My collection" && <section className="collection-section full-collection"><div className="section-heading"><div><div className="section-kicker">JUST FOR YOUR EYES</div><h2>Your collection <span className="subtle-count">{collection.length} entries</span></h2></div><button className="primary-button compact-button" onClick={openScanner}><Camera size={15}/> Scan a card</button></div><div className="filter-row"><label className="search-box"><Search size={16}/><input placeholder="Search your cards…" value={query} onChange={(e) => setQuery(e.target.value)}/></label><span className="private-tag"><UserRound size={13}/> Private portfolio</span></div><PortfolioGrid items={collection.filter((item) => `${item.card.name} ${item.card.set_name} ${item.card.game}`.toLowerCase().includes(query.toLowerCase()))} isOwner={isOwner} onEdit={(item) => { setEditingItem(item); setModal("edit"); }} onList={(item) => { setListingItem(item); setModal("listing"); }} onRemove={removeCollectionItem}/></section>}
 
-        {!busy && view === "Card catalog" && <section className="collection-section full-collection" aria-busy={catalogBusy}><div className="section-heading"><div><div className="section-kicker">DIGITAL CARD LIBRARY</div><h2>Browse cards <span className="subtle-count">{catalog.length}{catalogHasMore ? "+" : ""} shown</span></h2></div><button className="primary-button compact-button" onClick={() => setModal("scan")}><Camera size={15}/> Scan a card</button></div><div className="filter-row catalog-filters"><label className="search-box"><Search size={16}/><input placeholder="Search card names…" value={catalogSearch} onChange={(e) => setCatalogSearch(e.target.value)}/></label><label className="catalog-game-filter"><span>GAME</span><select value={catalogGame} onChange={(e) => setCatalogGame(e.target.value)}><option value="">All games</option>{catalogGames.map((game) => <option key={game} value={game}>{game}</option>)}</select></label></div>{catalogError && <div className="page-error">{catalogError}<button onClick={() => void loadCatalog(true)}>Retry</button></div>}{catalogRefreshing ? <CardSkeleton count={6} label="Loading catalog cards"/> : <CatalogGrid cards={catalog} collection={collection} addingId={catalogAdding} onAdd={addCatalogCard}/ >}{catalogHasMore && !catalogRefreshing && <button className="primary-button catalog-load-more" disabled={catalogBusy} onClick={() => void loadCatalog(false)}>{catalogBusy ? <><LoaderCircle className="spin" size={14}/> Loading…</> : "Load more cards"}</button>}</section>}
+        {!busy && view === "Card catalog" && <section className="collection-section full-collection" aria-busy={catalogBusy}><div className="section-heading"><div><div className="section-kicker">DIGITAL CARD LIBRARY</div><h2>Browse cards <span className="subtle-count">{catalog.length}{catalogHasMore ? "+" : ""} shown</span></h2></div><button className="primary-button compact-button" onClick={openScanner}><Camera size={15}/> Scan a card</button></div><div className="filter-row catalog-filters"><label className="search-box"><Search size={16}/><input placeholder="Search card names…" value={catalogSearch} onChange={(e) => setCatalogSearch(e.target.value)}/></label><label className="catalog-game-filter"><span>GAME</span><select value={catalogGame} onChange={(e) => setCatalogGame(e.target.value)}><option value="">All games</option>{catalogGames.map((game) => <option key={game} value={game}>{game}</option>)}</select></label></div>{catalogError && <div className="page-error">{catalogError}<button onClick={() => void loadCatalog(true)}>Retry</button></div>}{catalogRefreshing ? <CardSkeleton count={6} label="Loading catalog cards"/> : <CatalogGrid cards={catalog} collection={collection} addingId={catalogAdding} onAdd={addCatalogCard}/ >}{catalogHasMore && !catalogRefreshing && <button className="primary-button catalog-load-more" disabled={catalogBusy} onClick={() => void loadCatalog(false)}>{catalogBusy ? <><LoaderCircle className="spin" size={14}/> Loading…</> : "Load more cards"}</button>}</section>}
 
         {!busy && view === "Marketplace" && <section className="collection-section full-collection"><div className="section-heading"><div><div className="section-kicker">GOOD CARDS, ONE GOOD SHOP</div><h2>Shop the marketplace <span className="subtle-count">{filteredMarket.length} listings</span></h2></div><button className="primary-button compact-button" onClick={() => setModal("cart")}><ShoppingBag size={15}/> Cart · {cart.length}</button></div><div className="filter-row"><label className="search-box"><Search size={16}/><input placeholder="Search cards, sets, games…" value={query} onChange={(e) => setQuery(e.target.value)}/></label><button className="filter-button" onClick={() => setFilter(filter === "all" ? "sale" : "all")}><SlidersHorizontal size={15}/>{filter === "sale" ? "Discounted" : "Filters"}<ChevronDown size={14}/></button><button className={`chip ${filter === "sale" ? "selected" : ""}`} onClick={() => setFilter(filter === "sale" ? "all" : "sale")}>On sale</button></div><MarketGrid listings={filteredMarket} cart={cart} onAdd={addCart}/></section>}
 
@@ -277,9 +347,37 @@ export default function Home() {
 
     {cart.length > 0 && <button className="cart-float" onClick={() => setModal("cart")}><ShoppingBag size={16}/> Cart <span>{cart.length}</span></button>}
     {notice && <div className="toast"><Check size={16}/>{notice}</div>}
-    {modal && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setModal(null)}><div className="modal"><button className="modal-close" onClick={() => setModal(null)}><X size={18}/></button>
-      {modal === "scan" && <><div className="modal-icon"><Camera size={19}/></div><div className="section-kicker">ADD TO YOUR PRIVATE COLLECTION</div><h2>Let’s find your card.</h2><p>TCGDB identifies the card and TCG API looks up its market estimate. The photo is compressed on your device before upload.</p><button className="upload-box" disabled={scanBusy || saveBusy} onClick={() => fileInput.current?.click()}><Upload size={20}/><b>{scanBusy ? <><LoaderCircle className="spin" size={14}/> Identifying card…</> : "Take a photo or choose an image"}</b><span>JPEG, PNG, or WebP · optimized for upload</span></button><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden onChange={(e) => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; void scan(file); }}/>{scanUnmatched && <div className="scan-no-match"><span className="scan-placeholder-mark">?</span><b>No catalog match</b><small>This card is not available in the identification results.</small></div>}{scanError && <p className="scan-error">{scanError}</p>}{candidates.length > 0 && <div className="scan-candidates">{candidates.map((candidate) => <button className={`candidate-option ${selected === candidate ? "chosen" : ""}`} key={`${candidate.game}-${candidate.set}-${candidate.cardNumber}`} onClick={() => void chooseCandidate(candidate)} disabled={priceBusy || saveBusy}><span><b>{candidate.name}</b><small>{candidate.set} · {candidate.cardNumber} · {candidate.game}</small></span><span>{selected === candidate ? (priceBusy ? <><LoaderCircle className="spin" size={12}/> Checking price…</> : marketPrice == null ? "Price unavailable" : currency(marketPrice)) : `${Math.round((candidate.confidence || 0) * 100)}% match`}</span></button>)}</div>}{selected && <form className="scan-save-form" onSubmit={addScannedCard}><div className="selected-card-note"><b>{selected.name}</b><span>{selected.set} · {selected.cardNumber}</span><strong>{priceBusy ? "Loading estimate…" : marketPrice == null ? "No estimate returned — you can still save this card." : `${currency(marketPrice)} estimated market value`}</strong></div><div className="form-grid"><label>Condition<select name="condition"><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Grade<input name="grade" defaultValue="Ungraded"/></label><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue="1"/></label><label>What you paid<input name="purchasePrice" type="number" min="0" step=".01" placeholder="Optional"/></label></div><button className="primary-button modal-submit" disabled={priceBusy || saveBusy}>{saveBusy ? "Saving…" : "Add to my collection"}{saveBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button></form>}<div className="modal-footnote"><Sparkles size={13}/> Same photo results cache for 30 days; prices cache for 24 hours.</div></>}
-      {modal === "cart" && <><div className="modal-icon"><ShoppingBag size={19}/></div><div className="section-kicker">YOUR BAG</div><h2>{cartRows.length ? "Ready when you are." : "Your cart is empty."}</h2>{cartRows.length ? <><div className="cart-items">{cartRows.map(({ line, listing }) => <div className="cart-item" key={listing.id}><div className="mini-card-art teal">✳</div><div className="cart-item-title"><b>{listing.card.name}</b><span>{listing.card.set_name} · {currency(salePrice(listing,line.quantity))} each</span><div className="quantity-stepper"><button onClick={() => setCartQuantity(listing.id,line.quantity-1)}>−</button><span>{line.quantity}</span><button onClick={() => setCartQuantity(listing.id,line.quantity+1)} disabled={line.quantity >= listing.quantity}>+</button></div></div><strong>{currency(salePrice(listing,line.quantity)*line.quantity)}</strong></div>)}</div><div className="cart-total"><span>Subtotal</span><b>{currency(cartTotal)}</b></div><form className="checkout-form" onSubmit={checkout}><label>Your name<input required name="name" defaultValue={user?.email?.split("@")[0] || ""}/></label><label>Contact email<input required type="email" name="email" defaultValue={user?.email || ""}/></label><label>Shipping address<textarea required name="address" minLength={5} rows={2}/></label><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Placing order…" : "Place order"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button><p className="checkout-note">This creates a pending order. The store will contact you to arrange payment and delivery.</p></form></> : <p className="empty-copy">Browse the marketplace and add a card you love.</p>}</>}
+    {modal && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setModal(null)}><div className={`modal ${modal === "scan" ? "scan-modal" : ""}`}><button className="modal-close" onClick={() => setModal(null)}><X size={18}/></button>
+      {modal === "scan" && <div className="scan-flow">
+        <div className="scan-flow-heading"><div><div className="section-kicker">ADD TO YOUR PRIVATE COLLECTION</div><h2>{candidates.length ? "Review your match" : scanBusy ? "Finding your card…" : "Scan a card"}</h2><p>{candidates.length ? "Confirm the printing, then set quantity and condition." : "Frame one card at a time. Keep the set and card number in view."}</p></div><span className="scan-step">{candidates.length ? "02 / 02" : "01 / 02"}</span></div>
+        {cameraActive && <>
+          <div className={`scanner-view ${cameraError ? "scanner-view-fallback" : ""}`}>
+            {!cameraError && <video ref={videoRef} autoPlay playsInline muted onLoadedData={() => setCameraReady(true)} aria-label="Live card camera preview" />}
+            <div className="scanner-frame" aria-hidden="true"><i/><i/><i/><i/></div>
+            <div className="scanner-hint">{cameraError ? <><Camera size={15}/> Camera unavailable</> : cameraStarting || !cameraReady ? <><LoaderCircle className="spin" size={13}/> Starting camera…</> : "Place the full card inside the frame"}</div>
+            {cameraError && <button className="fallback-photo" onClick={() => fileInput.current?.click()}><Upload size={17}/><b>Choose a card photo</b><span>JPEG, PNG, or WebP</span></button>}
+          </div>
+          {cameraError && <p className="camera-error">{cameraError}</p>}
+          <div className="scanner-controls"><button className="shutter-button" aria-label="Capture card" disabled={cameraStarting || !cameraReady || Boolean(cameraError)} onClick={() => void captureCard()}><span/></button><button className="scan-gallery-button" onClick={() => fileInput.current?.click()}><Upload size={16}/><span>Choose photo</span></button></div>
+          {scanSuccess && <div className="scan-success"><Check size={16}/><span>{scanSuccess} <b>Scan the next card when you’re ready.</b></span></div>}
+          <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void scan(file); }}/>
+        </>}
+        {!cameraActive && scanBusy && <div className="scan-processing" role="status"><LoaderCircle className="spin" size={25}/><b>Looking for your card…</b><span>Matching the name, set, and card number.</span></div>}
+        {!cameraActive && !scanBusy && scanError && !scanUnmatched && candidates.length === 0 && <div className="scan-empty-match"><span className="scan-placeholder-mark">!</span><b>Could not identify this card</b><span>{scanError}</span><button className="primary-button" onClick={resetScanner}><Camera size={15}/> Try again</button></div>}
+        {!cameraActive && !scanBusy && scanUnmatched && <div className="scan-empty-match"><span className="scan-placeholder-mark">?</span><b>No exact match found</b><span>{scanError || "Try a clearer photo with the full card number visible."}</span><button className="primary-button" onClick={resetScanner}><Camera size={15}/> Scan again</button></div>}
+        {!cameraActive && !scanBusy && candidates.length > 0 && selected && <div className="scan-review">
+          <div className="match-card-preview">{selected.imageUrl ? <img src={selected.imageUrl} alt={`${selected.name} card`} /> : <div className="match-card-placeholder"><Sparkles size={24}/><span>{selected.game}</span></div>}<div><div className="scan-match-badge"><Check size={12}/> MATCH FOUND</div><h3>{selected.name}</h3><p>{selected.set} · {selected.cardNumber}</p><strong>{priceBusy ? <><LoaderCircle className="spin" size={13}/> Checking market price…</> : marketPrice == null ? "Market estimate unavailable" : `${currency(marketPrice)} market estimate`}</strong></div></div>
+          {candidates.length > 1 && <div className="scan-alternates"><div className="scan-alternates-heading">{candidates.length} possible matches <span>Tap to change</span></div><div className="scan-candidates">{candidates.map((candidate) => <button className={`candidate-option ${selected === candidate ? "chosen" : ""}`} key={`${candidate.game}-${candidate.set}-${candidate.cardNumber}`} onClick={() => void chooseCandidate(candidate)} disabled={priceBusy || saveBusy}><span><b>{candidate.name}</b><small>{candidate.set} · {candidate.cardNumber} · {candidate.game}</small></span><span>{selected === candidate ? "Selected" : `${Math.round((candidate.confidence || 0) * 100)}%`}</span></button>)}</div></div>}
+          {scanError && <p className="scan-error">{scanError}</p>}
+          <form className="scan-save-form" onSubmit={addScannedCard}><div className="form-grid"><label>Condition<select name="condition" defaultValue="Near Mint"><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue="1"/></label></div>
+            {showScanDetails && <div className="form-grid scan-extra-fields"><label>Grade<input name="grade" defaultValue="Ungraded"/></label><label>Purchase price<input name="purchasePrice" type="number" min="0" step=".01" placeholder="Optional"/></label></div>}
+            <button className="scan-details-toggle" type="button" onClick={() => setShowScanDetails(!showScanDetails)}>{showScanDetails ? "Hide extra details" : "Add grade or purchase price"}<ChevronDown size={14}/></button>
+            <button className="primary-button modal-submit" disabled={priceBusy || saveBusy}>{saveBusy ? <><LoaderCircle className="spin" size={15}/> Adding card…</> : <>Add to collection <ArrowRight size={15}/></>}</button>
+          </form>
+          <button className="scan-again-button" onClick={resetScanner}><Camera size={14}/> Scan another card</button>
+        </div>}
+        <div className="modal-footnote"><Sparkles size={13}/> Prices are estimates and may not match recent sale prices.</div>
+      </div>}      {modal === "cart" && <><div className="modal-icon"><ShoppingBag size={19}/></div><div className="section-kicker">YOUR BAG</div><h2>{cartRows.length ? "Ready when you are." : "Your cart is empty."}</h2>{cartRows.length ? <><div className="cart-items">{cartRows.map(({ line, listing }) => <div className="cart-item" key={listing.id}><div className="mini-card-art teal">✳</div><div className="cart-item-title"><b>{listing.card.name}</b><span>{listing.card.set_name} · {currency(salePrice(listing,line.quantity))} each</span><div className="quantity-stepper"><button onClick={() => setCartQuantity(listing.id,line.quantity-1)}>−</button><span>{line.quantity}</span><button onClick={() => setCartQuantity(listing.id,line.quantity+1)} disabled={line.quantity >= listing.quantity}>+</button></div></div><strong>{currency(salePrice(listing,line.quantity)*line.quantity)}</strong></div>)}</div><div className="cart-total"><span>Subtotal</span><b>{currency(cartTotal)}</b></div><form className="checkout-form" onSubmit={checkout}><label>Your name<input required name="name" defaultValue={user?.email?.split("@")[0] || ""}/></label><label>Contact email<input required type="email" name="email" defaultValue={user?.email || ""}/></label><label>Shipping address<textarea required name="address" minLength={5} rows={2}/></label><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Placing order…" : "Place order"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button><p className="checkout-note">This creates a pending order. The store will contact you to arrange payment and delivery.</p></form></> : <p className="empty-copy">Browse the marketplace and add a card you love.</p>}</>}
       {modal === "listing" && listingItem && <><div className="modal-icon"><Tag size={19}/></div><div className="section-kicker">SINGLE-STORE LISTING</div><h2>Set your asking price.</h2><p>Buyers see your asking price, not the private market estimate. Set an optional quantity and date rule for your discount.</p><form className="checkout-form" onSubmit={publishListing}><div className="selected-card-note"><b>{listingItem.card.name}</b><span>{listingItem.card.set_name} · {listingItem.quantity} in portfolio</span><strong>Private market estimate: {currency(Number(listingItem.card.market_value) || 0)}</strong></div><label>Asking price<input required name="askingPrice" type="number" min=".01" step=".01" defaultValue={listingItem.card.market_value || ""}/></label><div className="form-grid"><label>Discount %<input name="discountPercent" type="number" min="0" max="100" defaultValue="0"/></label><label>Minimum quantity<input name="discountMinQuantity" type="number" min="1" defaultValue="1"/></label><label>Starts at<input name="discountStartsAt" type="datetime-local"/></label><label>Ends at<input name="discountEndsAt" type="datetime-local"/></label></div><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Publishing…" : "Publish listing"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}</button></form></>}
       {modal === "edit" && editingItem && <><div className="modal-icon"><Tag size={19}/></div><div className="section-kicker">PRIVATE PORTFOLIO</div><h2>Edit your card.</h2><p>{editingItem.card.name} · {editingItem.card.set_name}</p><form className="checkout-form" onSubmit={saveCollectionEdit}><div className="form-grid"><label>Quantity<input name="quantity" type="number" min="1" max="99" defaultValue={editingItem.quantity}/></label><label>Grade<input name="grade" defaultValue={editingItem.grade}/></label><label>Condition<select name="condition" defaultValue={editingItem.condition}><option>Near Mint</option><option>Lightly Played</option><option>Moderately Played</option><option>Heavily Played</option><option>Damaged</option></select></label><label>Purchase price<input name="purchasePrice" type="number" min="0" step=".01" defaultValue={editingItem.purchase_price ?? ""}/></label></div><button className="primary-button modal-submit" disabled={formBusy}>{formBusy ? "Saving…" : "Save changes"} {formBusy ? <LoaderCircle className="spin" size={15}/> : <Check size={15}/>}</button></form></>}
     </div></div>}

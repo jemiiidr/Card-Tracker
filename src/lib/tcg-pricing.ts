@@ -18,6 +18,17 @@ function normalizedNumber(value: unknown) {
   return /^\d+$/.test(first) ? String(Number(first)) : first;
 }
 
+function setNameMatches(apiSet: unknown, identifiedSet: string) {
+  const actual = clean(apiSet);
+  const expected = clean(identifiedSet);
+  if (!actual || !expected) return false;
+  if (actual === expected) return true;
+  // TCGDB and TCG API sometimes include different punctuation or a game/set
+  // prefix. Accept containment only when the shorter name is reasonably specific.
+  const shorterLength = Math.min(actual.length, expected.length);
+  return shorterLength >= 6 && (actual.includes(expected) || expected.includes(actual));
+}
+
 async function getGames() {
   const response = await fetch(`${baseUrl}/games?per_page=100`, { next: { revalidate: 60 * 60 * 24 * 7 }, signal: AbortSignal.timeout(5_000) });
   const body = await response.json();
@@ -58,28 +69,30 @@ export async function getCachedTcgPrice(cardName: string, set: string, cardNumbe
   const gameSlug = await findGameSlug(game);
 
   const lookup = unstable_cache(async (card: string, expansion: string, collectorNumber: string, slug: string) => {
-    const query = new URLSearchParams({ q: card, game: slug, per_page: "100" });
-    const response = await fetch(`${baseUrl}/search?${query}`, {
-      headers: { "X-API-Key": apiKey },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8_000),
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      const message = body?.error?.message || body?.error || `TCG API price lookup failed (${response.status}).`;
-      throw new Error(typeof message === "string" ? message : `TCG API price lookup failed (${response.status}).`);
-    }
-    const rows = Array.isArray(body?.data) ? body.data : [];
     const wantedName = clean(card);
-    const wantedSet = clean(expansion);
     const wantedNumber = normalizedNumber(collectorNumber);
-    const matches = rows.filter((row: any) => {
-      const nameMatches = clean(row.name) === wantedName || clean(row.clean_name) === wantedName;
-      const setMatches = clean(row.set_name) === wantedSet;
-      const rowNumber = normalizedNumber(String(row.number ?? ""));
-      const numberMatches = Boolean(wantedNumber && rowNumber && wantedNumber === rowNumber);
-      return nameMatches && setMatches && numberMatches;
-    });
+    const matches: any[] = [];
+    let body: any;
+    // The search endpoint is relevance-ranked and paginated. Common card names
+    // can push the identified printing beyond page one, so walk a few pages.
+    for (let page = 1; page <= 3; page++) {
+      const query = new URLSearchParams({ q: card, game: slug, per_page: "100", page: String(page) });
+      const response = await fetch(`${baseUrl}/search?${query}`, {
+        headers: { "X-API-Key": apiKey }, cache: "no-store", signal: AbortSignal.timeout(8_000),
+      });
+      body = await response.json();
+      if (!response.ok) {
+        const message = body?.error?.message || body?.error || `TCG API price lookup failed (${response.status}).`;
+        throw new Error(typeof message === "string" ? message : `TCG API price lookup failed (${response.status}).`);
+      }
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      matches.push(...rows.filter((row: any) => {
+        const nameMatches = clean(row.name) === wantedName || clean(row.clean_name) === wantedName;
+        const number = normalizedNumber(row.number);
+        return nameMatches && Boolean(wantedNumber && number && number === wantedNumber) && setNameMatches(row.set_name, expansion);
+      }));
+      if (matches.length || !body?.meta?.has_more) break;
+    }
     matches.sort((a: any, b: any) => Number(Boolean(b.foil_only)) - Number(Boolean(a.foil_only)));
     const match = matches[0];
     return {

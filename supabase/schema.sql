@@ -50,6 +50,11 @@ create table if not exists public.collection_items (
   condition text not null default 'Near Mint',
   grade text not null default 'Ungraded',
   purchase_price numeric(12,2) check (purchase_price is null or purchase_price >= 0),
+  transaction_type text not null default 'bought' check (transaction_type in ('bought','sold')),
+  acquired_date date not null default current_date,
+  sold_at date,
+  vendor_description text not null default '',
+  sale_price numeric(12,2) check (sale_price is null or sale_price >= 0),
   acquired_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
@@ -58,7 +63,7 @@ create table if not exists public.expenses (
   owner_id uuid not null references public.profiles(id) on delete cascade,
   collection_item_id uuid references public.collection_items(id) on delete set null,
   description text not null check (char_length(description) between 1 and 160),
-  category text not null check (category in ('Card purchase','Grading','Supplies','Shipping','Fees','Other')),
+  category text not null check (category in ('Card purchase','Grading','Supplies','Shipping','Fees','Other','Other income')),
   amount numeric(12,2) not null check (amount > 0),
   expense_date date not null default current_date,
   created_at timestamptz not null default now(),

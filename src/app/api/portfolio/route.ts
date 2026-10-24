@@ -8,6 +8,12 @@ import { getCachedPokemonCardImage } from "@/lib/tcgdex-image";
 import { getApiTcgKey, getCachedApiTcgImage } from "@/lib/apitcg-image";
 
 const purchasePriceSchema = z.preprocess((value) => value === "" || value == null ? null : Number(value), z.number().finite().nonnegative().nullable());
+const salePriceSchema = purchasePriceSchema;
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}, "Enter a valid date.");
+const nullableDateSchema = z.preprocess((value) => value === "" ? null : value, z.union([dateSchema, z.null()]));
 const portfolioCreateSchema = z.object({
   name: z.string().trim().min(1).max(120), set: z.string().trim().min(1).max(120),
   cardNumber: z.string().trim().min(1).max(40), game: z.string().trim().min(1).max(80),
@@ -18,13 +24,15 @@ const portfolioCreateSchema = z.object({
 const portfolioUpdateSchema = z.object({
   id: z.string().min(1).max(80), quantity: z.coerce.number().int().min(1).max(99).optional(),
   purchasePrice: purchasePriceSchema.optional(), grade: z.string().max(50).optional(), condition: z.string().max(50).optional(),
+  transactionType: z.enum(["bought", "sold"]).optional(), acquiredDate: dateSchema.optional(), soldAt: nullableDateSchema.optional(),
+  vendorDescription: z.string().trim().max(300).optional(), salePrice: salePriceSchema.optional(),
 }).strict().refine((value) => Object.keys(value).some((key) => key !== "id"), "Provide at least one change.");
 
 export async function GET() {
   const session = await getApiSession();
   if (!session) return unauthorized();
   const { data: initialData, error } = await session.supabase.from("collection_items")
-    .select("id,quantity,condition,grade,purchase_price,acquired_at,created_at,card:card_catalog(id,catalog_key,name,set_name,card_number,game,rarity,image_url,market_value,price_updated_at)")
+    .select("id,quantity,condition,grade,purchase_price,transaction_type,acquired_date,sold_at,vendor_description,sale_price,acquired_at,created_at,card:card_catalog(id,catalog_key,name,set_name,card_number,game,rarity,image_url,market_value,price_updated_at)")
     .eq("owner_id", session.user.id).gt("quantity", 0).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   let data = initialData;
@@ -53,7 +61,7 @@ export async function GET() {
       }),
     ]);
     const refreshed = await session.supabase.from("collection_items")
-      .select("id,quantity,condition,grade,purchase_price,acquired_at,created_at,card:card_catalog(id,catalog_key,name,set_name,card_number,game,rarity,image_url,market_value,price_updated_at)")
+      .select("id,quantity,condition,grade,purchase_price,transaction_type,acquired_date,sold_at,vendor_description,sale_price,acquired_at,created_at,card:card_catalog(id,catalog_key,name,set_name,card_number,game,rarity,image_url,market_value,price_updated_at)")
       .eq("owner_id", session.user.id).gt("quantity", 0).order("created_at", { ascending: false });
     if (!refreshed.error) data = refreshed.data;
   }
@@ -129,7 +137,17 @@ export async function PATCH(request: Request) {
   if (body.purchasePrice !== undefined) updates.purchase_price = body.purchasePrice;
   if (body.grade !== undefined) updates.grade = String(body.grade).slice(0, 50);
   if (body.condition !== undefined) updates.condition = String(body.condition).slice(0, 50);
+  if (body.transactionType !== undefined) updates.transaction_type = body.transactionType;
+  if (body.acquiredDate !== undefined) updates.acquired_date = body.acquiredDate;
+  if (body.soldAt !== undefined) updates.sold_at = body.soldAt;
+  if (body.vendorDescription !== undefined) updates.vendor_description = body.vendorDescription;
+  if (body.salePrice !== undefined) updates.sale_price = body.salePrice;
+  if (body.transactionType === "bought") { updates.sold_at = null; updates.sale_price = null; }
   if (updates.purchase_price !== undefined && updates.purchase_price !== null && (!Number.isFinite(updates.purchase_price) || Number(updates.purchase_price) < 0)) return badRequest("Purchase price must be zero or more.");
+  if (body.transactionType === "sold") {
+    const { data: activeListing } = await session.supabase.from("listings").select("id").eq("inventory_item_id", id).eq("status", "active").maybeSingle();
+    if (activeListing) return NextResponse.json({ error: "Withdraw this store listing before recording the card as sold." }, { status: 409 });
+  }
   if (updates.quantity !== undefined) {
     const { data: activeListing } = await session.supabase.from("listings").select("id").eq("inventory_item_id", id).eq("status", "active").maybeSingle();
     if (activeListing) {
